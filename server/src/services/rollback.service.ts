@@ -1,7 +1,5 @@
 import { writeLogRepo } from '../repositories/redis/write-log.repo';
 import { relationRepo } from '../repositories/neo4j/relation.repo';
-import { characterRepo } from '../repositories/neo4j/character.repo';
-import { eventRepo } from '../repositories/neo4j/event.repo';
 import { snapshotService } from './snapshot.service';
 import { getSession } from '../repositories/neo4j/connection';
 import { getLogger } from '../utils/logger';

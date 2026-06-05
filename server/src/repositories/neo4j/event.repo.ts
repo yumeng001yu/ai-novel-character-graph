@@ -14,9 +14,10 @@ export class EventRepo {
          CREATE (n)-[:HAS_EVENT]->(e)`,
         { novelId: data.novelId, eventId: event.id }
       );
-      // 关联到章节
+      // 关联到章节（通过 HAS_CHAPTER 关系查找章节）
       await session.run(
-        `MATCH (e:Event {id: $eventId}), (c:Chapter {novelId: $novelId, index: $chapter})
+        `MATCH (e:Event {id: $eventId}), (n:Novel {id: $novelId})-[:HAS_CHAPTER]->(c:Chapter)
+         WHERE c.index = $chapter
          CREATE (e)-[:HAPPENS_IN]->(c)`,
         { eventId: event.id, novelId: data.novelId, chapter: data.chapter }
       );
@@ -43,10 +44,21 @@ export class EventRepo {
     const session = getSession();
     try {
       const result = await session.run(
-        `MATCH (e:Event {novelId: $novelId, chapter: $chapter}) RETURN e`,
+        `MATCH (n:Novel {id: $novelId})-[:HAS_EVENT]->(e:Event)
+         WHERE e.chapter = $chapter
+         RETURN e`,
         { novelId, chapter }
       );
       return result.records.map(r => r.get('e').properties as Event);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async deleteById(id: string): Promise<void> {
+    const session = getSession();
+    try {
+      await session.run(`MATCH (e:Event {id: $id}) DETACH DELETE e`, { id });
     } finally {
       await session.close();
     }

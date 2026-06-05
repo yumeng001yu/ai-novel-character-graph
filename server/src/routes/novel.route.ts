@@ -52,8 +52,11 @@ export async function novelRoutes(app: FastifyInstance) {
 
     // 为每个章节计算 Token 数
     const encoding = aiConfig?.model ? getEncodingForModel(aiConfig.model) : 'cl100k_base';
-    for (const ch of chapters) {
-      const chapterText = text.substring(ch.startOffset, ch.startOffset + ch.charCount + 500); // 多取一些避免截断
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
+      // 使用当前章节到下一章节的文本（而非 startOffset + charCount，因为 charCount 是去空格后的）
+      const endOffset = i < chapters.length - 1 ? chapters[i + 1].startOffset : text.length;
+      const chapterText = text.substring(ch.startOffset, endOffset);
       ch.tokenCount = estimateTokens(chapterText, encoding);
     }
     await chapterRepo.createBatch(chapters);

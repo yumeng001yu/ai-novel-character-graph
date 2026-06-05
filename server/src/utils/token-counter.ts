@@ -1,28 +1,28 @@
-import { encoding_for_model, TiktokenModel } from 'tiktoken';
+import { get_encoding, encoding_for_model, TiktokenModel } from 'tiktoken';
 import { getLogger } from './logger';
 
 const logger = getLogger();
 
 // 缓存编码器，避免重复初始化
-let cachedEncoder: ReturnType<typeof encoding_for_model> | null = null;
-let cachedModel: string = '';
+let cachedEncoder: ReturnType<typeof get_encoding> | null = null;
+let cachedEncodingName: string = '';
 
 /**
  * 获取或创建 tiktoken 编码器
- * 默认使用 cl100k_base（GPT-4/GPT-3.5-turbo 通用编码）
+ * 使用 get_encoding 加载指定编码（如 cl100k_base、o200k_base）
  */
-function getEncoder(modelName: string = 'cl100k_base'): ReturnType<typeof encoding_for_model> {
-  if (cachedEncoder && cachedModel === modelName) {
+function getEncoder(encodingName: string = 'cl100k_base'): ReturnType<typeof get_encoding> {
+  if (cachedEncoder && cachedEncodingName === encodingName) {
     return cachedEncoder;
   }
   try {
-    cachedEncoder = encoding_for_model(modelName as TiktokenModel);
-    cachedModel = modelName;
-    logger.info(`tiktoken 编码器已加载：${modelName}`);
+    cachedEncoder = get_encoding(encodingName as any);
+    cachedEncodingName = encodingName;
+    logger.info(`tiktoken 编码器已加载：${encodingName}`);
     return cachedEncoder!;
   } catch (err) {
-    logger.warn(`tiktoken 加载模型 ${modelName} 失败，回退到 cl100k_base`);
-    if (modelName !== 'cl100k_base') {
+    logger.warn(`tiktoken 加载编码 ${encodingName} 失败，回退到 cl100k_base`);
+    if (encodingName !== 'cl100k_base') {
       return getEncoder('cl100k_base');
     }
     throw err;
@@ -32,11 +32,11 @@ function getEncoder(modelName: string = 'cl100k_base'): ReturnType<typeof encodi
 /**
  * 使用 tiktoken 精确计算文本的 Token 数量
  * @param text 要计算的文本
- * @param model 模型名称（决定使用的编码器），默认 cl100k_base（兼容 GPT-4/3.5-turbo）
+ * @param encodingName 编码名称（如 cl100k_base、o200k_base），默认 cl100k_base
  */
-export function estimateTokens(text: string, model: string = 'cl100k_base'): number {
+export function estimateTokens(text: string, encodingName: string = 'cl100k_base'): number {
   try {
-    const encoder = getEncoder(model);
+    const encoder = getEncoder(encodingName);
     const tokens = encoder.encode(text);
     return tokens.length;
   } catch (err) {
@@ -49,9 +49,9 @@ export function estimateTokens(text: string, model: string = 'cl100k_base'): num
 /**
  * 批量计算多个文本的 Token 数量（复用编码器，性能更好）
  */
-export function estimateTokensBatch(texts: string[], model: string = 'cl100k_base'): number[] {
+export function estimateTokensBatch(texts: string[], encodingName: string = 'cl100k_base'): number[] {
   try {
-    const encoder = getEncoder(model);
+    const encoder = getEncoder(encodingName);
     return texts.map(t => encoder.encode(t).length);
   } catch (err) {
     logger.warn('tiktoken 批量计算失败，使用粗略估算');
@@ -74,12 +74,13 @@ export function calculateAvailableInputTokens(
 }
 
 /**
- * 根据模型名称获取推荐的编码器名称
+ * 根据模型名称获取推荐的编码名称
+ * 返回的是编码名（如 cl100k_base），用于 get_encoding()
  */
 export function getEncodingForModel(modelId: string): string {
   const lower = modelId.toLowerCase();
   
-  // GPT-4o / GPT-4o-mini 使用 o200k_base
+  // GPT-4o / GPT-4o-mini / o1 / o3 / o4 使用 o200k_base
   if (lower.includes('gpt-4o') || lower.includes('o1-') || lower.includes('o3-') || lower.includes('o4-')) {
     return 'o200k_base';
   }

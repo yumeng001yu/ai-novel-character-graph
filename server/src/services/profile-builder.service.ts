@@ -1,6 +1,5 @@
 import { CharacterProfile, ExperienceEvent, PersonalAnalysis, KeyRelationship, Inference } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
-import { relationRepo } from '../repositories/neo4j/relation.repo';
 import { callAI } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';

@@ -35,11 +35,17 @@ export class SnapshotService {
       isInference: r.isInference,
     }));
 
+    // 计算已覆盖的章节字数和 Token 数
+    const chapters = await chapterRepo.findByNovelId(novelId);
+    const coveredChapters = chapters.filter(c => chaptersCovered.includes(c.index));
+    const totalCharsCovered = coveredChapters.reduce((sum, c) => sum + c.charCount, 0);
+    const totalTokensCovered = coveredChapters.reduce((sum, c) => sum + (c.tokenCount || 0), 0);
+
     const snapshot: Snapshot = {
       step: stepNumber,
       chaptersCovered,
-      totalCharsCovered: 0,
-      totalTokensCovered: 0,
+      totalCharsCovered,
+      totalTokensCovered,
       nodes,
       edges,
       events,
