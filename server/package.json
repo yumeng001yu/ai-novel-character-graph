@@ -1,0 +1,35 @@
+{
+  "name": "ai-novel-character-graph-server",
+  "version": "0.1.0",
+  "description": "AI小说角色图谱 - 后端服务",
+  "main": "dist/app.js",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "fastify": "^4.28.0",
+    "@fastify/cors": "^9.0.0",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/static": "^7.0.0",
+    "neo4j-driver": "^5.21.0",
+    "ioredis": "^5.4.0",
+    "openai": "^4.52.0",
+    "jschardet": "^3.1.0",
+    "iconv-lite": "^0.6.3",
+    "tiktoken": "^1.0.15",
+    "js-yaml": "^4.1.0",
+    "uuid": "^9.0.1",
+    "pino": "^9.3.0",
+    "pino-pretty": "^11.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "@types/node": "^20.14.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/uuid": "^9.0.8"
+  }
+}

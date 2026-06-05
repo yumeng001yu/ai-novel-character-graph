@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.21
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/novelgraph123
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./server/config.yaml:/app/config.yaml
+      - ./output:/app/output
+      - ./logs:/app/logs
+    depends_on:
+      - neo4j
+      - redis
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  redis_data:

@@ -1,0 +1,30 @@
+server:
+  port: 3001
+  host: 0.0.0.0
+
+neo4j:
+  uri: bolt://neo4j:7687
+  username: neo4j
+  password: novelgraph123
+  database: novel_graph
+
+redis:
+  host: redis
+  port: 6379
+  password: ""
+  db: 0
+
+build:
+  max_file_size_mb: 50
+  snapshot_dir: ./output/snapshots
+  enable_inference: true
+  default_context_size: 200000
+  default_max_retries: 3
+  max_concurrent_ai_calls: 3
+
+encryption:
+  key_file: ./config/encryption.key
+
+log:
+  level: info
+  file: ./logs/app.log
