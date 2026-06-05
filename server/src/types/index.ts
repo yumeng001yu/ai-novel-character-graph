@@ -104,6 +104,7 @@ export interface Relation {
   inferenceBasis?: string;
   description: string;
   novelId: string;
+  createdStep?: number; // 创建该关系的步骤编号，用于回退
 }
 
 // ===== 事件相关 =====

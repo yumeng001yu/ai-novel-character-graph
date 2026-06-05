@@ -105,6 +105,7 @@ export class MergerService {
         inferenceBasis: relData.inferenceBasis,
         description: relData.description,
         novelId,
+        createdStep: stepNumber,
       });
       newRelations.push(relation);
 

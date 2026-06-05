@@ -54,10 +54,32 @@ export class RelationRepo {
     }
   }
 
+  /**
+   * 删除指定步创建的关系
+   * 使用写操作日志中记录的关系 ID 来精确删除
+   */
+  async deleteByRelationIds(relationIds: string[]): Promise<void> {
+    if (relationIds.length === 0) return;
+    const session = getSession();
+    try {
+      for (const relId of relationIds) {
+        await session.run(
+          `MATCH ()-[r:RELATES_TO {id: $relId}]->() DELETE r`,
+          { relId }
+        );
+      }
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * 删除指定步创建的关系（通过 createdStep 属性）
+   * 需要在创建关系时存储 createdStep 属性
+   */
   async deleteByStep(novelId: string, stepNumber: number): Promise<void> {
     const session = getSession();
     try {
-      // 删除在指定步创建的关系（通过 sinceChapter 关联）
       await session.run(
         `MATCH (c1:Character {novelId: $novelId})-[r:RELATES_TO]->(c2:Character)
          WHERE r.createdStep = $step

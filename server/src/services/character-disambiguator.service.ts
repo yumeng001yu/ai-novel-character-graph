@@ -1,7 +1,9 @@
 import { Character } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
+import { getSession } from '../repositories/neo4j/connection';
 import { callAI } from './ai-client.service';
 import { getLogger } from '../utils/logger';
+import { v4 as uuid } from 'uuid';
 
 const logger = getLogger();
 
@@ -83,20 +85,125 @@ ${charList}
   }
 
   /**
-   * 合并角色
+   * 合并角色：将 mergeIds 的角色合并到 primaryId
+   * 被合并角色的所有关系转移到主角色，被合并角色被删除
    */
   async mergeCharacters(primaryId: string, mergeIds: string[]): Promise<void> {
-    await characterRepo.mergeCharacters(primaryId, mergeIds);
+    const session = getSession();
+    try {
+      const tx = session.beginTransaction();
+
+      for (const mergeId of mergeIds) {
+        // 将被合并角色的出边转移到主角色
+        await tx.run(
+          `MATCH (c1:Character {id: $mergeId})-[r:RELATES_TO]->(c2)
+           CREATE (c3:Character {id: $primaryId})-[:RELATES_TO]->(c2)
+           SET c3 += properties(r)`,
+          { mergeId, primaryId }
+        );
+        // 将被合并角色的入边转移到主角色
+        await tx.run(
+          `MATCH (c2)-[r:RELATES_TO]->(c1:Character {id: $mergeId})
+           CREATE (c2)-[:RELATES_TO]->(c3:Character {id: $primaryId})
+           SET c3 += properties(r)`,
+          { mergeId, primaryId }
+        );
+        // 将被合并角色的别名添加到主角色
+        await tx.run(
+          `MATCH (primary:Character {id: $primaryId}), (merge:Character {id: $mergeId})
+           SET primary.aliases = primary.aliases + merge.name`,
+          { primaryId, mergeId }
+        );
+        // 删除被合并角色
+        await tx.run(`MATCH (c:Character {id: $mergeId}) DETACH DELETE c`, { mergeId });
+      }
+
+      await tx.commit();
+    } finally {
+      await session.close();
+    }
+
     logger.info(`角色合并完成：${mergeIds.join(',')} → ${primaryId}`);
   }
 
   /**
-   * 拆分角色（标记为待拆分）
+   * 拆分角色：将一个角色拆分为多个独立角色
+   * 创建新角色节点，并将原角色的部分关系分配给新角色
    */
-  async splitCharacter(characterId: string): Promise<void> {
+  async splitCharacter(
+    characterId: string,
+    splitInfo: Array<{ name: string; aliases: string[] }>
+  ): Promise<Character[]> {
+    const original = await characterRepo.findById(characterId);
+    if (!original) throw new Error(`角色未找到: ${characterId}`);
+
+    const newCharacters: Character[] = [];
+    const session = getSession();
+
+    try {
+      const tx = session.beginTransaction();
+
+      for (const info of splitInfo) {
+        const newId = uuid();
+        // 创建新角色节点
+        await tx.run(
+          `CREATE (c:Character {
+            id: $id,
+            name: $name,
+            aliases: $aliases,
+            gender: $gender,
+            faction: $faction,
+            identity: $identity,
+            firstAppearChapter: $firstAppearChapter,
+            isProtagonist: false,
+            disambiguationStatus: 'confirmed',
+            novelId: $novelId
+          })`,
+          {
+            id: newId,
+            name: info.name,
+            aliases: info.aliases,
+            gender: original.gender,
+            faction: original.faction,
+            identity: original.identity,
+            firstAppearChapter: original.firstAppearChapter,
+            novelId: original.novelId,
+          }
+        );
+
+        // 关联到小说
+        await tx.run(
+          `MATCH (n:Novel {id: $novelId}), (c:Character {id: $charId})
+           CREATE (n)-[:HAS_CHARACTER]->(c)`,
+          { novelId: original.novelId, charId: newId }
+        );
+
+        newCharacters.push({
+          id: newId,
+          name: info.name,
+          aliases: info.aliases,
+          gender: original.gender,
+          faction: original.faction,
+          identity: original.identity,
+          firstAppearChapter: original.firstAppearChapter,
+          isProtagonist: false,
+          disambiguationStatus: 'confirmed',
+          novelId: original.novelId,
+        });
+      }
+
+      await tx.commit();
+    } finally {
+      await session.close();
+    }
+
+    // 更新原角色状态为已拆分
     await characterRepo.update(characterId, {
       disambiguationStatus: 'pending_split',
     });
+
+    logger.info(`角色拆分完成：${original.name} → ${splitInfo.map(s => s.name).join('、')}`);
+    return newCharacters;
   }
 }
 

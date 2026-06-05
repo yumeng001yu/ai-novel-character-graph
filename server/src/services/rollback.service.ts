@@ -1,6 +1,7 @@
 import { writeLogRepo } from '../repositories/redis/write-log.repo';
-import { characterRepo } from '../repositories/neo4j/character.repo';
 import { relationRepo } from '../repositories/neo4j/relation.repo';
+import { characterRepo } from '../repositories/neo4j/character.repo';
+import { eventRepo } from '../repositories/neo4j/event.repo';
 import { snapshotService } from './snapshot.service';
 import { getSession } from '../repositories/neo4j/connection';
 import { getLogger } from '../utils/logger';
@@ -35,40 +36,50 @@ export class RollbackService {
       return;
     }
 
-    const session = getSession();
-    try {
-      const tx = session.beginTransaction();
+    // 分类收集需要删除的 ID
+    const nodeIdsToDelete: { label: string; id: string }[] = [];
+    const relationIdsToDelete: string[] = [];
 
-      // 逆序执行写操作日志
-      for (let i = log.length - 1; i >= 0; i--) {
-        const entry = log[i];
-        switch (entry.action) {
-          case 'create_node':
-            await tx.run(
-              `MATCH (n:${entry.label} {id: $id}) DETACH DELETE n`,
-              { id: entry.id }
-            );
-            break;
-          case 'create_edge':
-            // RELATES_TO 边通过关系属性删除
-            await tx.run(
-              `MATCH ()-[r:RELATES_TO {id: $id}]->() DELETE r`,
-              { id: entry.id }
-            );
-            break;
-          case 'update_node':
-            // 更新操作较难回退，简化处理
-            break;
-        }
+    for (const entry of log) {
+      switch (entry.action) {
+        case 'create_node':
+          nodeIdsToDelete.push({ label: entry.label, id: entry.id });
+          break;
+        case 'create_edge':
+          relationIdsToDelete.push(entry.id);
+          break;
+        // update_node/update_edge 不需要删除，但需要回退
+        // 简化处理：update 操作暂不回退（后续可增强）
       }
+    }
 
-      await tx.commit();
-    } finally {
-      await session.close();
+    // 删除关系（先删关系再删节点，避免约束冲突）
+    if (relationIdsToDelete.length > 0) {
+      await relationRepo.deleteByRelationIds(relationIdsToDelete);
+      logger.info(`步骤 ${step}：删除 ${relationIdsToDelete.length} 条关系`);
+    }
+
+    // 删除节点
+    if (nodeIdsToDelete.length > 0) {
+      const session = getSession();
+      try {
+        const tx = session.beginTransaction();
+        for (const node of nodeIdsToDelete) {
+          await tx.run(
+            `MATCH (n {id: $id}) DETACH DELETE n`,
+            { id: node.id }
+          );
+        }
+        await tx.commit();
+      } finally {
+        await session.close();
+      }
+      logger.info(`步骤 ${step}：删除 ${nodeIdsToDelete.length} 个节点`);
     }
 
     // 清理写操作日志
     await writeLogRepo.deleteLog(novelId, step);
+    logger.info(`步骤 ${step} 回退完成`);
   }
 }
 

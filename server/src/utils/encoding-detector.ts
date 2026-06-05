@@ -1,50 +1,82 @@
 import fs from 'fs';
-import iconv from 'iconv-lite';
 import { getLogger } from './logger';
 
 const logger = getLogger();
 
+/**
+ * 自动检测文件编码并解码为 UTF-8 字符串
+ * 支持常见中文编码：UTF-8、GBK、GB2312、GB18030、Big5
+ */
 export function detectAndDecode(buffer: Buffer): string {
-  // 先尝试 UTF-8
-  try {
-    const text = buffer.toString('utf-8');
-    // 检查是否有乱码（简单检测：UTF-8 解码后是否包含替换字符）
-    if (!text.includes('\ufffd')) {
-      return text;
-    }
-  } catch {
-    // UTF-8 解码失败
+  // 第一步：先尝试 UTF-8（最常见）
+  const utf8Text = buffer.toString('utf-8');
+  if (!utf8Text.includes('\ufffd')) {
+    return utf8Text;
   }
 
-  // 尝试检测编码
+  // 第二步：使用 jschardet 检测编码
   let detectedEncoding = 'utf-8';
   try {
-    // 使用 jschardet 检测
     const jschardet = require('jschardet');
     const result = jschardet.detect(buffer);
-    if (result.encoding && result.encoding !== 'ascii') {
+    if (result.encoding && result.encoding !== 'ascii' && result.confidence > 0.7) {
       detectedEncoding = result.encoding;
+      logger.info(`jschardet 检测编码: ${detectedEncoding}（置信度: ${(result.confidence * 100).toFixed(0)}%）`);
     }
   } catch {
-    logger.warn('编码检测失败，尝试 GBK 解码');
+    logger.warn('jschardet 检测失败，尝试 iconv-lite 解码');
   }
 
-  // 如果检测到 GBK/GB2312/GB18030，用 iconv-lite 解码
-  if (['gbk', 'gb2312', 'gb18030', 'big5'].includes(detectedEncoding.toLowerCase())) {
-    try {
+  // 第三步：使用 iconv-lite 解码检测到的编码
+  try {
+    const iconv = require('iconv-lite');
+    if (iconv.encodingExists(detectedEncoding)) {
       const text = iconv.decode(buffer, detectedEncoding);
-      logger.info(`文件编码检测为: ${detectedEncoding}`);
-      return text;
-    } catch (err) {
-      logger.warn(`使用 ${detectedEncoding} 解码失败，回退到 UTF-8`);
+      // 验证解码结果是否合理（不包含大量替换字符）
+      const replacementCount = (text.match(/\ufffd/g) || []).length;
+      if (replacementCount < text.length * 0.01) {
+        logger.info(`文件编码检测为: ${detectedEncoding}`);
+        return text;
+      }
+      logger.warn(`${detectedEncoding} 解码后仍有较多乱码，继续尝试其他编码`);
+    }
+  } catch (err) {
+    logger.warn(`iconv-lite ${detectedEncoding} 解码失败`);
+  }
+
+  // 第四步：依次尝试常见中文编码
+  const fallbackEncodings = ['gbk', 'gb18030', 'gb2312', 'big5', 'euc-kr', 'shift_jis'];
+  for (const encoding of fallbackEncodings) {
+    try {
+      const iconv = require('iconv-lite');
+      if (!iconv.encodingExists(encoding)) continue;
+      const text = iconv.decode(buffer, encoding);
+      const replacementCount = (text.match(/\ufffd/g) || []).length;
+      if (replacementCount < text.length * 0.01) {
+        logger.info(`文件编码回退检测为: ${encoding}`);
+        return text;
+      }
+    } catch {
+      continue;
     }
   }
 
-  // 最后回退到 UTF-8
-  return buffer.toString('utf-8');
+  // 最终回退到 UTF-8
+  logger.warn('所有编码检测均失败，使用 UTF-8（可能存在乱码）');
+  return utf8Text;
 }
 
+/**
+ * 从文件路径读取并自动检测编码
+ */
 export function readFileWithEncoding(filePath: string): string {
   const buffer = fs.readFileSync(filePath);
+  return detectAndDecode(buffer);
+}
+
+/**
+ * 从 Buffer 直接检测编码（用于上传文件场景）
+ */
+export function decodeBuffer(buffer: Buffer): string {
   return detectAndDecode(buffer);
 }

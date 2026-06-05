@@ -5,5 +5,6 @@ dist/
 output/
 logs/
 config/encryption.key
+config.local.yaml
 *.pyc
 .DS_Store

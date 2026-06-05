@@ -53,10 +53,13 @@ export async function characterRoutes(app: FastifyInstance) {
 
   // 角色拆分
   app.post('/split', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { characterId } = req.body as any;
-    if (!characterId) return reply.status(400).send({ error: '缺少参数' });
-    await characterDisambiguatorService.splitCharacter(characterId);
-    reply.send({ success: true });
+    const { characterId, splitInfo } = req.body as any;
+    if (!characterId) return reply.status(400).send({ error: '缺少 characterId' });
+    if (!splitInfo || !Array.isArray(splitInfo) || splitInfo.length === 0) {
+      return reply.status(400).send({ error: '缺少 splitInfo（拆分信息数组，每项包含 name 和 aliases）' });
+    }
+    const newCharacters = await characterDisambiguatorService.splitCharacter(characterId, splitInfo);
+    reply.send({ success: true, newCharacters });
   });
 
   // 冲突列表
