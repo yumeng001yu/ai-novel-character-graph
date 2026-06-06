@@ -1,7 +1,7 @@
 import { Character } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
 import { getSession } from '../repositories/neo4j/connection';
-import { callAI } from './ai-client.service';
+import { callAIStream, AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';
 
@@ -18,7 +18,7 @@ export class CharacterDisambiguatorService {
   /**
    * 检测可能的同名异人/同人异名
    */
-  async detectDisambiguations(novelId: string): Promise<DisambiguationCandidate[]> {
+  async detectDisambiguations(novelId: string, onStream?: AIStreamCallback): Promise<DisambiguationCandidate[]> {
     const characters = await characterRepo.findByNovelId(novelId);
     const candidates: DisambiguationCandidate[] = [];
 
@@ -59,7 +59,11 @@ ${charList}
 如果没有，返回空数组 []`;
 
       try {
-        const response = await callAI(prompt, '你是小说分析专家，擅长识别同人异名。');
+        const response = await callAIStream(
+          prompt,
+          '你是小说分析专家，擅长识别同人异名。',
+          { onStream, phase: 'disambiguating' },
+        );
         const jsonMatch = response.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);

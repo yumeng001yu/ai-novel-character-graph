@@ -1,4 +1,4 @@
-import { BuildTask, TaskStatus, StepProgress, AIContentRefusedError } from '../types';
+import { BuildTask, TaskStatus, StepProgress, AIContentRefusedError, AIStreamEvent } from '../types';
 import { taskQueueRepo } from '../repositories/redis/task-queue.repo';
 import { progressRepo } from '../repositories/redis/progress.repo';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
@@ -15,6 +15,7 @@ import { snapshotService } from './snapshot.service';
 import { searchIndexerService } from './search-indexer.service';
 import { rollbackService } from './rollback.service';
 import { settingsService } from './settings.service';
+import { AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { estimateTokens, getEncodingForModel } from '../utils/token-counter';
 import { getConfig } from '../config';
@@ -46,6 +47,18 @@ function readNovelText(novelId: string): string {
 }
 
 export class TaskManagerService {
+  /**
+   * 创建 AI 流式回调函数，将 AI 交互详情实时推送到 SSE
+   */
+  private createAIStreamCallback(novelId: string): AIStreamCallback {
+    return (event: AIStreamEvent) => {
+      // 实时推送 AI 流式事件到 SSE
+      progressRepo.publishAIStream(novelId, event).catch(err => {
+        logger.warn({ err }, '推送 AI 流式事件失败');
+      });
+    };
+  }
+
   /**
    * 启动构建任务
    */
@@ -107,6 +120,9 @@ export class TaskManagerService {
     const aiConfig = await settingsService.getAiConfig();
     const encoding = aiConfig?.model ? getEncodingForModel(aiConfig.model) : 'cl100k_base';
 
+    // 创建 AI 流式回调
+    const onStream = this.createAIStreamCallback(novelId);
+
     // 读取原文
     const fullText = readNovelText(novelId);
 
@@ -139,21 +155,17 @@ export class TaskManagerService {
     let skipPostProcessing = false;
     if (resumeFromStep !== undefined && resumeFromStep !== null) {
       if (resumeFromPhase === 'protagonist_detecting') {
-        // 所有步骤已完成，主角识别已完成，只需搜索索引
         startStep = steps.length;
         skipPostProcessing = true;
         logger.info('断点续建：跳过所有步骤，从搜索索引开始');
       } else if (resumeFromPhase === 'indexing') {
-        // 搜索索引也完成了，直接标记完成
         startStep = steps.length;
         skipPostProcessing = true;
         logger.info('断点续建：所有步骤已完成，直接标记完成');
       } else if (resumeFromPhase === 'step_completed' || resumeFromPhase === 'step_skipped') {
-        // 上一步完全完成，从下一步开始
         startStep = resumeFromStep + 1;
         logger.info(`断点续建：从第 ${startStep + 1} 步开始`);
       } else {
-        // 上一步中途失败（如 extracting、disambiguating 等），从同一步重新开始
         startStep = resumeFromStep;
         logger.info(`断点续建：从第 ${startStep + 1} 步重新开始（上次完成阶段：${resumeFromPhase}）`);
       }
@@ -164,7 +176,6 @@ export class TaskManagerService {
       // 检查是否取消
       const task = await taskQueueRepo.getTask(novelId);
       if (task?.status === 'canceling') {
-        // 等当前步完成后再取消
         await rollbackService.rollback(novelId, i, i + 1);
         await taskQueueRepo.updateStatus(novelId, 'canceled');
         return;
@@ -192,7 +203,7 @@ export class TaskManagerService {
 
         // AI 提取
         const existingChars = (await characterRepo.findByNovelId(novelId)).map(c => c.name);
-        const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars);
+        const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars, onStream);
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'extracting');
 
         // 角色消歧
@@ -201,7 +212,7 @@ export class TaskManagerService {
           phase: 'disambiguating',
           message: '正在检测角色消歧...',
         });
-        await characterDisambiguatorService.detectDisambiguations(novelId);
+        await characterDisambiguatorService.detectDisambiguations(novelId, onStream);
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'disambiguating');
 
         // 增量合并
@@ -226,14 +237,13 @@ export class TaskManagerService {
         await progressRepo.setProgress(novelId, {
           stepNumber: i + 1,
           phase: 'profile_updating',
-          message: '正在更新角色档案...',
+          message: `正在更新角色档案（共${mergeResult.newCharacters.length + mergeResult.updatedCharacters.length}个角色）...`,
         });
         for (const char of mergeResult.newCharacters) {
-          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
+          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange, onStream);
         }
-        // 也更新已有角色中在本步出现的角色
         for (const char of mergeResult.updatedCharacters) {
-          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
+          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange, onStream);
         }
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'profile_updating');
 
@@ -253,7 +263,6 @@ export class TaskManagerService {
         logger.info(`步骤 ${i + 1}/${totalSteps} 完成：新增 ${mergeResult.newCharacters.length} 角色，${mergeResult.newRelations.length} 关系`);
       } catch (err: any) {
         if (err instanceof AIContentRefusedError) {
-          // AI 内容审核拒绝：跳过该步骤，继续下一步
           logger.warn(`步骤 ${i + 1}（${step.chaptersRange}）AI 内容审核拒绝，跳过该步骤：${err.reason}`);
           await progressRepo.setProgress(novelId, {
             stepNumber: i + 1,
@@ -261,12 +270,10 @@ export class TaskManagerService {
             message: `步骤 ${i + 1}（${step.chaptersRange}）因 AI 内容审核被跳过：${err.reason}`,
           });
           await taskQueueRepo.updateLastCompletedStep(novelId, i, 'content_refused');
-          // 更新步数进度（即使跳过也算推进）
           await novelRepo.updateStep(novelId, i + 1, totalSteps);
           await taskQueueRepo.updateProgress(novelId, i + 1);
           continue;
         }
-        // 其他错误：抛出，让外层 catch 处理
         throw err;
       }
     }
@@ -280,7 +287,7 @@ export class TaskManagerService {
         phase: 'snapshot_saving',
         message: '正在识别主角...',
       });
-      await protagonistDetectorService.detectProtagonists(novelId);
+      await protagonistDetectorService.detectProtagonists(novelId, onStream);
       await taskQueueRepo.updateLastCompletedStep(novelId, totalSteps - 1, 'protagonist_detecting');
     }
 

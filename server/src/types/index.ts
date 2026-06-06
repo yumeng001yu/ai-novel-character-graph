@@ -180,6 +180,66 @@ export interface BuildTask {
   error?: string;
 }
 
+// ===== AI 日志 =====
+export interface AILogEntry {
+  /** 日志唯一ID */
+  id: string;
+  /** 调用时间 */
+  timestamp: string;
+  /** 调用阶段 */
+  phase: string;
+  /** 发送给 AI 的提示词（截断） */
+  prompt: string;
+  /** 系统提示词 */
+  systemPrompt?: string;
+  /** AI 返回的原始响应（截断） */
+  response: string;
+  /** Token 用量 */
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+  /** 调用耗时(ms) */
+  duration?: number;
+  /** 重试次数 */
+  retryCount?: number;
+  /** 是否出错 */
+  error?: string;
+  /** 提取结果摘要 */
+  resultSummary?: string;
+}
+
+/** AI 流式输出事件 */
+export interface AIStreamEvent {
+  /** 关联的日志ID */
+  logId: string;
+  /** 事件类型：start=开始, delta=增量文本, done=完成 */
+  type: 'start' | 'delta' | 'done';
+  /** 调用阶段 */
+  phase: string;
+  /** 开始事件的提示词（截断） */
+  prompt?: string;
+  /** 开始事件的系统提示词（截断） */
+  systemPrompt?: string;
+  /** 增量文本 */
+  delta?: string;
+  /** 完成时的完整响应（截断） */
+  fullResponse?: string;
+  /** 完成时的 Token 用量 */
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+  /** 完成时的耗时(ms) */
+  duration?: number;
+  /** 完成时的重试次数 */
+  retryCount?: number;
+  /** 错误信息 */
+  error?: string;
+}
+
 export interface StepProgress {
   stepNumber: number;
   phase: 'extracting' | 'disambiguating' | 'merging' | 'conflict_detecting' | 'profile_updating' | 'snapshot_saving';
@@ -189,6 +249,8 @@ export interface StepProgress {
     output: number;
     total: number;
   };
+  /** 当前步骤的 AI 日志列表 */
+  aiLogs?: AILogEntry[];
 }
 
 // ===== 成本预估 =====

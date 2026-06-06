@@ -1,5 +1,5 @@
 import { getRedis } from './connection';
-import { StepProgress } from '../../types';
+import { StepProgress, AILogEntry, AIStreamEvent } from '../../types';
 import { taskQueueRepo } from './task-queue.repo';
 
 const KEY_PREFIX = 'progress:';
@@ -22,6 +22,22 @@ export class ProgressRepo {
   async deleteProgress(novelId: string): Promise<void> {
     const redis = getRedis();
     await redis.del(`${KEY_PREFIX}${novelId}`);
+  }
+
+  /**
+   * 推送 AI 调用日志（独立于进度更新，实时性更高）
+   */
+  async publishAILog(novelId: string, aiLog: AILogEntry): Promise<void> {
+    const redis = getRedis();
+    await redis.publish(`progress:${novelId}`, JSON.stringify({ aiLog }));
+  }
+
+  /**
+   * 推送 AI 流式事件（逐字输出）
+   */
+  async publishAIStream(novelId: string, event: AIStreamEvent): Promise<void> {
+    const redis = getRedis();
+    await redis.publish(`progress:${novelId}`, JSON.stringify({ aiStream: event }));
   }
 }
 

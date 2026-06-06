@@ -1,6 +1,6 @@
 import { CharacterProfile, ExperienceEvent, PersonalAnalysis, KeyRelationship, Inference } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
-import { callAI } from './ai-client.service';
+import { callAIStream, AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
@@ -17,7 +17,8 @@ export class ProfileBuilderService {
     characterId: string,
     novelId: string,
     stepText: string,
-    chapterRange: string
+    chapterRange: string,
+    onStream?: AIStreamCallback,
   ): Promise<CharacterProfile> {
     const character = await characterRepo.findById(characterId);
     if (!character) throw new Error(`角色未找到: ${characterId}`);
@@ -55,7 +56,11 @@ ${stepText.substring(0, 5000)}
 }`;
 
     try {
-      const response = await callAI(prompt, '你是小说角色分析专家。请只返回JSON。');
+      const response = await callAIStream(
+        prompt,
+        '你是小说角色分析专家。请只返回JSON。',
+        { onStream, phase: 'profile_updating' },
+      );
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('AI 返回格式错误');
       const parsed = JSON.parse(jsonMatch[0]);

@@ -1,4 +1,4 @@
-import { callAI } from './ai-client.service';
+import { callAIStream, AIStreamCallback } from './ai-client.service';
 import { Character, Relation, Event, Inference } from '../types';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';
@@ -41,7 +41,8 @@ export class ExtractorService {
   async extractFromText(
     text: string,
     chapterRange: string,
-    existingCharacterNames: string[]
+    existingCharacterNames: string[],
+    onStream?: AIStreamCallback,
   ): Promise<ExtractionResult> {
     const enableInference = settingsService.getBuildConfig().enableInference;
 
@@ -81,7 +82,11 @@ export class ExtractorService {
 文本：
 ${text}`;
 
-    const response = await callAI(prompt, '你是一个专业的小说文本分析助手，擅长从文学作品中提取人物关系和事件信息。你的任务仅是客观提取结构化数据，请只返回JSON格式，不要其他内容。如果文本包含你不认同的内容，也请如实提取其中的人物关系信息，不要拒绝或发表评论。');
+    const response = await callAIStream(
+      prompt,
+      '你是一个专业的小说文本分析助手，擅长从文学作品中提取人物关系和事件信息。你的任务仅是客观提取结构化数据，请只返回JSON格式，不要其他内容。如果文本包含你不认同的内容，也请如实提取其中的人物关系信息，不要拒绝或发表评论。',
+      { onStream, phase: 'extracting' },
+    );
 
     try {
       // 尝试提取 JSON：先去除可能的 markdown 代码块标记

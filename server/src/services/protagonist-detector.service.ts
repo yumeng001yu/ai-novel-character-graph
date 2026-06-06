@@ -1,12 +1,12 @@
 import { Character, AIContentRefusedError } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
-import { callAI } from './ai-client.service';
+import { callAIStream, AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
 
 export class ProtagonistDetectorService {
-  async detectProtagonists(novelId: string): Promise<Character[]> {
+  async detectProtagonists(novelId: string, onStream?: AIStreamCallback): Promise<Character[]> {
     const characters = await characterRepo.findByNovelId(novelId);
     if (characters.length === 0) return [];
 
@@ -25,7 +25,11 @@ ${charList}
 只返回主角，非主角不需要列出。`;
 
     try {
-      const response = await callAI(prompt, '你是小说分析专家，擅长判断主角。请只返回JSON格式数据。');
+      const response = await callAIStream(
+        prompt,
+        '你是小说分析专家，擅长判断主角。请只返回JSON格式数据。',
+        { onStream, phase: 'protagonist_detecting' },
+      );
       const jsonMatch = response.match(/\[[\s\S]*\]/);
       if (!jsonMatch) throw new Error('AI 返回格式错误');
       const parsed = JSON.parse(jsonMatch[0]);

@@ -3,9 +3,16 @@ import { aiSettingsRepo } from '../repositories/file/ai-settings.repo';
 import { decrypt } from '../utils/crypto';
 import { getLogger } from '../utils/logger';
 import { getConfig } from '../config';
-import { AIContentRefusedError } from '../types';
+import { AIContentRefusedError, AILogEntry, AIStreamEvent } from '../types';
+import { v4 as uuid } from 'uuid';
 
 const logger = getLogger();
+
+/** AI 流式事件回调函数类型 */
+export type AIStreamCallback = (event: AIStreamEvent) => void;
+
+/** AI 调用回调函数类型，用于实时推送 AI 交互详情 */
+export type AICallCallback = (log: AILogEntry) => void;
 
 let openaiClient: OpenAI | null = null;
 let currentConfigHash: string = '';
@@ -33,7 +40,41 @@ export async function getOpenAIClient(): Promise<OpenAI> {
   return openaiClient;
 }
 
-export async function callAI(prompt: string, systemPrompt?: string, retries?: number): Promise<string> {
+/** 截断文本，避免日志过大 */
+function truncate(text: string, maxLen: number = 2000): string {
+  if (text.length <= maxLen) return text;
+  return text.substring(0, maxLen) + `...（共${text.length}字，已截断）`;
+}
+
+export interface CallAIOptions {
+  /** 重试次数 */
+  retries?: number;
+  /** AI 调用回调，用于实时推送 AI 交互详情 */
+  onAICall?: AICallCallback;
+  /** 当前阶段标识 */
+  phase?: string;
+}
+
+export async function callAI(prompt: string, systemPrompt?: string, retries?: number): Promise<string>;
+export async function callAI(prompt: string, systemPrompt?: string, options?: CallAIOptions): Promise<string>;
+export async function callAI(
+  prompt: string,
+  systemPrompt?: string,
+  retriesOrOptions?: number | CallAIOptions,
+): Promise<string> {
+  // 兼容旧调用方式
+  let retries: number | undefined;
+  let onAICall: AICallCallback | undefined;
+  let phase: string | undefined;
+
+  if (typeof retriesOrOptions === 'number') {
+    retries = retriesOrOptions;
+  } else if (retriesOrOptions) {
+    retries = retriesOrOptions.retries;
+    onAICall = retriesOrOptions.onAICall;
+    phase = retriesOrOptions.phase;
+  }
+
   const config = await aiSettingsRepo.load();
   if (!config) throw new Error('AI 配置未设置');
 
@@ -42,6 +83,17 @@ export async function callAI(prompt: string, systemPrompt?: string, retries?: nu
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const startTime = Date.now();
+    const logEntry: AILogEntry = {
+      id: uuid(),
+      timestamp: new Date().toISOString(),
+      phase: phase || 'unknown',
+      prompt: truncate(prompt),
+      systemPrompt: systemPrompt ? truncate(systemPrompt, 500) : undefined,
+      response: '',
+      retryCount: attempt - 1,
+    };
+
     try {
       const messages: any[] = [];
       if (systemPrompt) {
@@ -60,27 +112,48 @@ export async function callAI(prompt: string, systemPrompt?: string, retries?: nu
       if (!content) throw new Error('AI 返回内容为空');
 
       // 检测 AI 内容审核拒绝
-      // OpenAI 兼容 API 在内容被拒绝时 finish_reason 为 'content_filter'
       const finishReason = response.choices[0]?.finish_reason;
       if (finishReason === 'content_filter') {
         throw new AIContentRefusedError('AI 模型内容审核过滤，该段文本可能包含被屏蔽的内容');
       }
 
-      // 检测 AI 返回的 refusal 字段（OpenAI 格式）
       const refusalField = (response.choices[0]?.message as any)?.refusal;
       if (refusalField) {
         throw new AIContentRefusedError(`AI 模型拒绝处理：${refusalField}`);
       }
 
-      // 检测 AI 返回文本中的拒绝模式（不同模型拒绝格式不同）
       const contentRefused = detectContentRefusal(content);
       if (contentRefused) {
         throw new AIContentRefusedError(contentRefused);
       }
 
+      // 记录成功日志
+      logEntry.response = truncate(content);
+      logEntry.duration = Date.now() - startTime;
+      const usage = response.usage;
+      if (usage) {
+        logEntry.tokenUsage = {
+          input: usage.prompt_tokens,
+          output: usage.completion_tokens,
+          total: usage.total_tokens,
+        };
+      }
+
+      // 回调通知
+      if (onAICall) {
+        onAICall(logEntry);
+      }
+
       return content;
     } catch (err: any) {
       lastError = err;
+
+      // 记录错误日志
+      logEntry.error = err.message || String(err);
+      logEntry.duration = Date.now() - startTime;
+      if (onAICall) {
+        onAICall(logEntry);
+      }
 
       // AI 内容审核拒绝不可重试，直接抛出
       if (err instanceof AIContentRefusedError) {
@@ -94,8 +167,141 @@ export async function callAI(prompt: string, systemPrompt?: string, retries?: nu
         throw err;
       }
 
-      const delay = Math.pow(2, attempt - 1) * 1000; // 指数退避
+      const delay = Math.pow(2, attempt - 1) * 1000;
       logger.warn({ attempt, delay, err: err.message }, 'AI 调用失败，重试中');
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * 流式调用 AI，逐字推送输出到前端
+ * 返回完整响应文本（与 callAI 接口一致），但过程中通过 onStream 回调实时推送增量
+ */
+export async function callAIStream(
+  prompt: string,
+  systemPrompt?: string,
+  options?: {
+    retries?: number;
+    onStream?: AIStreamCallback;
+    phase?: string;
+  },
+): Promise<string> {
+  const config = await aiSettingsRepo.load();
+  if (!config) throw new Error('AI 配置未设置');
+
+  const maxRetries = options?.retries ?? getConfig().build.default_max_retries;
+  const client = await getOpenAIClient();
+  const onStream = options?.onStream;
+  const phase = options?.phase || 'unknown';
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const logId = uuid();
+    const startTime = Date.now();
+
+    // 推送 start 事件
+    if (onStream) {
+      onStream({
+        logId,
+        type: 'start',
+        phase,
+        prompt: truncate(prompt),
+        systemPrompt: systemPrompt ? truncate(systemPrompt, 500) : undefined,
+      });
+    }
+
+    try {
+      const messages: any[] = [];
+      if (systemPrompt) {
+        messages.push({ role: 'system', content: systemPrompt });
+      }
+      messages.push({ role: 'user', content: prompt });
+
+      // 流式调用
+      const stream = await client.chat.completions.create({
+        model: config.model,
+        messages,
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        stream: true,
+        stream_options: { include_usage: true },
+      });
+
+      let fullContent = '';
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) {
+          fullContent += delta;
+          // 推送 delta 事件
+          if (onStream) {
+            onStream({
+              logId,
+              type: 'delta',
+              phase,
+              delta,
+            });
+          }
+        }
+
+        // 检测内容审核
+        const finishReason = chunk.choices[0]?.finish_reason;
+        if (finishReason === 'content_filter') {
+          throw new AIContentRefusedError('AI 模型内容审核过滤，该段文本可能包含被屏蔽的内容');
+        }
+      }
+
+      if (!fullContent) throw new Error('AI 返回内容为空');
+
+      // 检测内容审核拒绝
+      const contentRefused = detectContentRefusal(fullContent);
+      if (contentRefused) {
+        throw new AIContentRefusedError(contentRefused);
+      }
+
+      // 推送 done 事件
+      if (onStream) {
+        onStream({
+          logId,
+          type: 'done',
+          phase,
+          fullResponse: truncate(fullContent),
+          duration: Date.now() - startTime,
+          retryCount: attempt - 1,
+        });
+      }
+
+      return fullContent;
+    } catch (err: any) {
+      lastError = err;
+
+      // 推送错误事件
+      if (onStream) {
+        onStream({
+          logId,
+          type: 'done',
+          phase,
+          error: err.message || String(err),
+          duration: Date.now() - startTime,
+          retryCount: attempt - 1,
+        });
+      }
+
+      if (err instanceof AIContentRefusedError) {
+        throw err;
+      }
+
+      const isRetryable = err.status === 429 || err.status === 500 || err.status === 502 || err.code === 'ECONNRESET';
+      if (!isRetryable || attempt === maxRetries) {
+        logger.error({ err, attempt }, 'AI 流式调用失败');
+        throw err;
+      }
+
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      logger.warn({ attempt, delay, err: err.message }, 'AI 流式调用失败，重试中');
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

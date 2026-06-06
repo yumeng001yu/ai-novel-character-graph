@@ -1,7 +1,77 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space, Tooltip, Tag } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space, Tooltip, Tag, Typography, Empty } from 'antd';
+import { ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { startBuild, cancelBuild, getCostEstimate, getNovels, getTaskStatus } from '../../services/api';
+
+const { Text, Paragraph } = Typography;
+
+/** AI 流式事件 */
+interface AIStreamEvent {
+  logId: string;
+  type: 'start' | 'delta' | 'done';
+  phase: string;
+  prompt?: string;
+  systemPrompt?: string;
+  delta?: string;
+  fullResponse?: string;
+  tokenUsage?: { input: number; output: number; total: number };
+  duration?: number;
+  retryCount?: number;
+  error?: string;
+}
+
+/** 渲染用的日志条目 */
+interface AILogItem {
+  logId: string;
+  phase: string;
+  prompt?: string;
+  systemPrompt?: string;
+  streamingText: string;   // 流式累积的文本
+  fullResponse?: string;   // 完成后的完整响应
+  tokenUsage?: { input: number; output: number; total: number };
+  duration?: number;
+  retryCount?: number;
+  error?: string;
+  status: 'streaming' | 'done' | 'error';
+  timestamp: number;
+}
+
+const phaseLabels: Record<string, string> = {
+  extracting: '提取人物关系',
+  disambiguating: '角色消歧',
+  merging: '合并图谱数据',
+  conflict_detecting: '冲突检测',
+  profile_updating: '更新角色档案',
+  snapshot_saving: '保存快照',
+  protagonist_detecting: '主角识别',
+  indexing: '搜索索引',
+  content_refused: '内容审核跳过',
+  step_skipped: '跳过',
+  step_completed: '步骤完成',
+};
+
+const phaseColors: Record<string, string> = {
+  extracting: 'blue',
+  disambiguating: 'purple',
+  merging: 'green',
+  conflict_detecting: 'orange',
+  profile_updating: 'cyan',
+  snapshot_saving: 'default',
+  protagonist_detecting: 'red',
+  indexing: 'default',
+};
+
+function formatDuration(ms?: number): string {
+  if (!ms) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTokens(n?: number): string {
+  if (!n) return '-';
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
 
 const Task: React.FC = () => {
   const [novels, setNovels] = useState<any[]>([]);
@@ -10,11 +80,38 @@ const Task: React.FC = () => {
   const [taskStatus, setTaskStatus] = useState<any>(null);
   const [costEstimate, setCostEstimate] = useState<any>(null);
   const [building, setBuilding] = useState(false);
+  const [aiLogs, setAiLogs] = useState<AILogItem[]>([]);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const logsRef = useRef<AILogItem[]>([]);
+  const expandedKeysRef = useRef<string[]>([]);
+
+  // 保持 ref 同步
+  useEffect(() => { logsRef.current = aiLogs; }, [aiLogs]);
+  useEffect(() => { expandedKeysRef.current = expandedKeys; }, [expandedKeys]);
 
   useEffect(() => {
     loadNovels();
   }, []);
+
+  // 自动滚动到底部
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [aiLogs, autoScroll]);
+
+  // 新日志条目自动展开
+  useEffect(() => {
+    if (aiLogs.length > 0) {
+      const lastLog = aiLogs[aiLogs.length - 1];
+      if (!expandedKeys.includes(lastLog.logId)) {
+        setExpandedKeys(prev => [...prev, lastLog.logId]);
+      }
+    }
+  }, [aiLogs.length]);
 
   const loadNovels = async () => {
     try {
@@ -25,9 +122,47 @@ const Task: React.FC = () => {
     }
   };
 
+  // 处理流式事件
+  const handleStreamEvent = useCallback((event: AIStreamEvent) => {
+    if (event.type === 'start') {
+      // 新建日志条目
+      const newLog: AILogItem = {
+        logId: event.logId,
+        phase: event.phase,
+        prompt: event.prompt,
+        systemPrompt: event.systemPrompt,
+        streamingText: '',
+        status: 'streaming',
+        timestamp: Date.now(),
+      };
+      setAiLogs(prev => [...prev, newLog]);
+    } else if (event.type === 'delta') {
+      // 增量追加文本
+      setAiLogs(prev => prev.map(log =>
+        log.logId === event.logId
+          ? { ...log, streamingText: log.streamingText + (event.delta || '') }
+          : log
+      ));
+    } else if (event.type === 'done') {
+      // 完成
+      setAiLogs(prev => prev.map(log =>
+        log.logId === event.logId
+          ? {
+              ...log,
+              status: event.error ? 'error' : 'done',
+              fullResponse: event.fullResponse,
+              tokenUsage: event.tokenUsage,
+              duration: event.duration,
+              retryCount: event.retryCount,
+              error: event.error,
+            }
+          : log
+      ));
+    }
+  }, []);
+
   // 连接 SSE 进度推送
   const connectSSE = useCallback((id: string) => {
-    // 先关闭已有连接
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -39,9 +174,46 @@ const Task: React.FC = () => {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+
+        // 处理 AI 流式事件
+        if (data.aiStream) {
+          handleStreamEvent(data.aiStream);
+        }
+
+        // 处理 AI 日志（兼容旧格式）
+        if (data.aiLog) {
+          const log = data.aiLog;
+          handleStreamEvent({
+            logId: log.id,
+            type: 'start',
+            phase: log.phase,
+            prompt: log.prompt,
+            systemPrompt: log.systemPrompt,
+          });
+          handleStreamEvent({
+            logId: log.id,
+            type: 'delta',
+            phase: log.phase,
+            delta: log.response,
+          });
+          handleStreamEvent({
+            logId: log.id,
+            type: 'done',
+            phase: log.phase,
+            fullResponse: log.response,
+            tokenUsage: log.tokenUsage,
+            duration: log.duration,
+            retryCount: log.retryCount,
+            error: log.error,
+          });
+        }
+
+        // 处理进度更新
         if (data.progress) {
           setProgress(data.progress);
         }
+
+        // 处理任务状态
         if (data.task) {
           setTaskStatus(data.task);
           if (['completed', 'failed', 'canceled'].includes(data.task.status)) {
@@ -62,11 +234,9 @@ const Task: React.FC = () => {
 
     eventSource.onerror = () => {
       // SSE 连接断开时不立即关闭，让浏览器自动重连
-      // 只有在任务已完成时才关闭
     };
-  }, []);
+  }, [handleStreamEvent]);
 
-  // 断开 SSE
   const disconnectSSE = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -74,7 +244,7 @@ const Task: React.FC = () => {
     }
   }, []);
 
-  // 选择小说时检查任务状态并自动连接 SSE
+  // 选择小说时检查任务状态
   useEffect(() => {
     if (!novelId) return;
 
@@ -84,11 +254,8 @@ const Task: React.FC = () => {
         if (res.data) {
           setTaskStatus(res.data);
           if (res.data.status === 'running') {
-            // 有正在运行的任务，自动连接 SSE
             setBuilding(true);
             connectSSE(novelId);
-          } else if (res.data.status === 'failed' && res.data.lastCompletedStep !== undefined) {
-            setBuilding(false);
           } else {
             setBuilding(false);
           }
@@ -101,18 +268,15 @@ const Task: React.FC = () => {
       }
     };
 
+    setAiLogs([]);
+    setProgress(null);
     checkAndConnect();
 
-    return () => {
-      disconnectSSE();
-    };
+    return () => { disconnectSSE(); };
   }, [novelId, connectSSE, disconnectSSE]);
 
-  // 组件卸载时断开 SSE（但服务端构建继续运行）
   useEffect(() => {
-    return () => {
-      disconnectSSE();
-    };
+    return () => { disconnectSSE(); };
   }, [disconnectSSE]);
 
   const handleBuild = async () => {
@@ -120,6 +284,7 @@ const Task: React.FC = () => {
     setBuilding(true);
     setProgress(null);
     setTaskStatus(null);
+    setAiLogs([]);
     try {
       await startBuild(novelId);
       message.success('构建任务已启动');
@@ -133,6 +298,7 @@ const Task: React.FC = () => {
   const handleResume = async () => {
     if (!novelId) return message.warning('请选择小说');
     setBuilding(true);
+    setAiLogs([]);
     try {
       await startBuild(novelId);
       message.success('断点续建已启动');
@@ -162,22 +328,21 @@ const Task: React.FC = () => {
     }
   };
 
-  const phaseLabels: Record<string, string> = {
-    extracting: '提取人物关系',
-    disambiguating: '角色消歧',
-    merging: '合并图谱数据',
-    conflict_detecting: '冲突检测',
-    profile_updating: '更新角色档案',
-    snapshot_saving: '保存快照',
-    protagonist_detecting: '主角识别',
-    indexing: '搜索索引',
-    content_refused: '内容审核跳过',
-    step_skipped: '跳过',
-    step_completed: '步骤完成',
-  };
-
   const isFailedWithProgress = taskStatus?.status === 'failed' && taskStatus?.lastCompletedStep !== undefined;
   const isRunning = taskStatus?.status === 'running';
+
+  // 统计总 Token 用量
+  const totalTokenUsage = aiLogs.reduce(
+    (acc, log) => ({
+      input: acc.input + (log.tokenUsage?.input || 0),
+      output: acc.output + (log.tokenUsage?.output || 0),
+      total: acc.total + (log.tokenUsage?.total || 0),
+    }),
+    { input: 0, output: 0, total: 0 },
+  );
+
+  // 正在流式输出的日志数量
+  const streamingCount = aiLogs.filter(l => l.status === 'streaming').length;
 
   return (
     <div>
@@ -241,6 +406,12 @@ const Task: React.FC = () => {
               {isRunning && (
                 <div style={{ marginTop: 8 }}>
                   <Tag color="processing">构建中</Tag>
+                  {totalTokenUsage.total > 0 && (
+                    <Tag color="blue">已用Token: {formatTokens(totalTokenUsage.total)}</Tag>
+                  )}
+                  {streamingCount > 0 && (
+                    <Tag color="cyan">AI 输出中 x{streamingCount}</Tag>
+                  )}
                   <span style={{ color: '#888', fontSize: 12 }}>离开此页面不会中断构建，返回后将自动恢复进度显示</span>
                 </div>
               )}
@@ -248,6 +419,208 @@ const Task: React.FC = () => {
           )}
         </Card>
       )}
+
+      {/* AI 实时日志面板 */}
+      <Card
+        title={
+          <Space>
+            <span>AI 实时日志</span>
+            {aiLogs.length > 0 && <Tag color="blue">{aiLogs.length} 条</Tag>}
+            {totalTokenUsage.total > 0 && (
+              <Tag color="green">
+                Token: {formatTokens(totalTokenUsage.input)} 入 / {formatTokens(totalTokenUsage.output)} 出
+              </Tag>
+            )}
+          </Space>
+        }
+        extra={
+          <Space>
+            <Button size="small" type={autoScroll ? 'primary' : 'default'} onClick={() => setAutoScroll(!autoScroll)}>
+              {autoScroll ? '自动滚动' : '手动滚动'}
+            </Button>
+            {aiLogs.length > 0 && <Button size="small" onClick={() => setAiLogs([])}>清空</Button>}
+          </Space>
+        }
+        style={{ marginBottom: 24 }}
+      >
+        {aiLogs.length === 0 ? (
+          <Empty
+            description={isRunning ? '等待 AI 响应...' : '暂无 AI 日志，启动构建后实时显示'}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        ) : (
+          <div
+            ref={logContainerRef}
+            style={{
+              maxHeight: 600,
+              overflowY: 'auto',
+              border: '1px solid #f0f0f0',
+              borderRadius: 6,
+              padding: 8,
+            }}
+          >
+            {aiLogs.map((log) => (
+              <div
+                key={log.logId}
+                style={{
+                  marginBottom: 8,
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                }}
+              >
+                {/* 标题栏 */}
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    background: log.status === 'error' ? '#fff2f0' : log.status === 'streaming' ? '#e6f7ff' : '#f6ffed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => {
+                    setExpandedKeys(prev =>
+                      prev.includes(log.logId)
+                        ? prev.filter(k => k !== log.logId)
+                        : [...prev, log.logId]
+                    );
+                  }}
+                >
+                  {log.status === 'streaming' ? (
+                    <LoadingOutlined style={{ color: '#1890ff' }} />
+                  ) : log.status === 'error' ? (
+                    <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                  ) : (
+                    <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                  )}
+                  <Tag color={phaseColors[log.phase] || 'default'} style={{ marginRight: 0 }}>
+                    {phaseLabels[log.phase] || log.phase}
+                  </Tag>
+                  {log.status === 'streaming' && (
+                    <Tag color="processing" style={{ fontSize: 11 }}>输出中...</Tag>
+                  )}
+                  {log.tokenUsage && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {formatTokens(log.tokenUsage.total)} tokens
+                    </Text>
+                  )}
+                  {log.duration && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {formatDuration(log.duration)}
+                    </Text>
+                  )}
+                  {log.retryCount && log.retryCount > 0 && (
+                    <Tag color="warning" style={{ fontSize: 11 }}>重试{log.retryCount}次</Tag>
+                  )}
+                  {log.error && <Text type="danger" style={{ fontSize: 12 }}>失败</Text>}
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </Text>
+                </div>
+
+                {/* 流式输出区域 - 始终显示 */}
+                <div style={{ padding: '8px 12px' }}>
+                  {/* 流式文本（打字机效果） */}
+                  <div
+                    style={{
+                      background: '#f9f9f9',
+                      padding: 8,
+                      borderRadius: 4,
+                      border: '1px solid #d9d9d9',
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {log.streamingText || (log.status === 'streaming' ? '▌' : '')}
+                    {log.status === 'streaming' && (
+                      <span style={{ animation: 'blink 1s infinite', color: '#1890ff' }}>▌</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 展开详情 */}
+                {expandedKeys.includes(log.logId) && (
+                  <div style={{ padding: '0 12px 8px' }}>
+                    {/* 系统提示词 */}
+                    {log.systemPrompt && (
+                      <div style={{ marginBottom: 8 }}>
+                        <Text strong style={{ color: '#722ed1' }}>系统提示词：</Text>
+                        <Paragraph
+                          style={{ marginBottom: 0, fontSize: 12, color: '#666', whiteSpace: 'pre-wrap' }}
+                          ellipsis={{ rows: 3, expandable: 'collapsible', symbol: '展开' }}
+                        >
+                          {log.systemPrompt}
+                        </Paragraph>
+                      </div>
+                    )}
+
+                    {/* 用户提示词 */}
+                    {log.prompt && (
+                      <div style={{ marginBottom: 8 }}>
+                        <Text strong style={{ color: '#1890ff' }}>提示词：</Text>
+                        <Paragraph
+                          style={{ marginBottom: 0, fontSize: 12, color: '#333', whiteSpace: 'pre-wrap' }}
+                          ellipsis={{ rows: 5, expandable: 'collapsible', symbol: '展开' }}
+                        >
+                          {log.prompt}
+                        </Paragraph>
+                      </div>
+                    )}
+
+                    {/* 错误信息 */}
+                    {log.error && (
+                      <div style={{ marginBottom: 8 }}>
+                        <Text strong style={{ color: '#ff4d4f' }}>错误：</Text>
+                        <Paragraph
+                          style={{
+                            marginBottom: 0,
+                            fontSize: 12,
+                            color: '#ff4d4f',
+                            background: '#fff2f0',
+                            padding: 8,
+                            borderRadius: 4,
+                            border: '1px solid #ffccc7',
+                          }}
+                        >
+                          {log.error}
+                        </Paragraph>
+                      </div>
+                    )}
+
+                    {/* Token 用量 */}
+                    {log.tokenUsage && (
+                      <div style={{ marginTop: 4 }}>
+                        <Space size={16}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            输入: {log.tokenUsage.input.toLocaleString()} tokens
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            输出: {log.tokenUsage.output.toLocaleString()} tokens
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            合计: {log.tokenUsage.total.toLocaleString()} tokens
+                          </Text>
+                          {log.duration && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              耗时: {formatDuration(log.duration)}
+                            </Text>
+                          )}
+                        </Space>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <Card title="构建流程">
         <Steps direction="vertical" items={[
@@ -258,6 +631,14 @@ const Task: React.FC = () => {
           { title: '搜索索引', description: '构建角色搜索索引' },
         ]} />
       </Card>
+
+      {/* 光标闪烁动画 */}
+      <style>{`
+        @keyframes blink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 };
