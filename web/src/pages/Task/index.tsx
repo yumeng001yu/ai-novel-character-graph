@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space } from 'antd';
-import { startBuild, cancelBuild, getCostEstimate, getNovels } from '../../services/api';
+import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space, Tooltip } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import { startBuild, cancelBuild, getCostEstimate, getNovels, getTaskStatus } from '../../services/api';
 
 const Task: React.FC = () => {
   const [novels, setNovels] = useState<any[]>([]);
@@ -23,11 +24,35 @@ const Task: React.FC = () => {
     }
   };
 
+  // 选择小说时检查是否有失败的任务
+  useEffect(() => {
+    if (!novelId) return;
+    checkExistingTask();
+  }, [novelId]);
+
+  const checkExistingTask = async () => {
+    try {
+      const res = await getTaskStatus(novelId);
+      if (res.data) {
+        setTaskStatus(res.data);
+        if (res.data.status === 'failed' && res.data.lastCompletedStep !== undefined) {
+          setBuilding(false);
+        } else if (res.data.status === 'running') {
+          setBuilding(true);
+        }
+      } else {
+        setTaskStatus(null);
+      }
+    } catch {
+      // 忽略
+    }
+  };
+
   useEffect(() => {
     if (!novelId || !building) return;
 
     // 订阅 SSE 进度
-    const eventSource = new EventSource(`/api/novels/${novelId}/progress`);
+    const eventSource = new EventSource(`/novelgraph/api/novels/${novelId}/progress`);
 
     eventSource.onmessage = (event) => {
       try {
@@ -43,7 +68,7 @@ const Task: React.FC = () => {
             if (data.task.status === 'completed') {
               message.success('构建完成！');
             } else if (data.task.status === 'failed') {
-              message.error('构建失败');
+              message.error('构建失败，可点击"断点续建"从上次中断处继续');
             }
           }
         }
@@ -75,6 +100,18 @@ const Task: React.FC = () => {
     }
   };
 
+  const handleResume = async () => {
+    if (!novelId) return message.warning('请选择小说');
+    setBuilding(true);
+    try {
+      await startBuild(novelId);
+      message.success('断点续建已启动');
+    } catch (err: any) {
+      message.error(err.response?.data?.error || '续建失败');
+      setBuilding(false);
+    }
+  };
+
   const handleCancel = async () => {
     try {
       await cancelBuild(novelId);
@@ -101,7 +138,11 @@ const Task: React.FC = () => {
     conflict_detecting: '冲突检测',
     profile_updating: '更新角色档案',
     snapshot_saving: '保存快照',
+    protagonist_detecting: '主角识别',
+    indexing: '搜索索引',
   };
+
+  const isFailedWithProgress = taskStatus?.status === 'failed' && taskStatus?.lastCompletedStep !== undefined;
 
   return (
     <div>
@@ -111,6 +152,13 @@ const Task: React.FC = () => {
             onChange={setNovelId}
             options={novels.map((n: any) => ({ label: n.name, value: n.id }))} />
           <Button type="primary" onClick={handleBuild} loading={building}>启动构建</Button>
+          {isFailedWithProgress && (
+            <Tooltip title={`从第${(taskStatus.lastCompletedStep || 0) + 1}步继续`}>
+              <Button type="primary" icon={<ReloadOutlined />} onClick={handleResume} disabled={building}>
+                断点续建
+              </Button>
+            </Tooltip>
+          )}
           <Button danger onClick={handleCancel} disabled={!building}>取消构建</Button>
           <Button onClick={handleEstimate} disabled={!novelId}>成本预估</Button>
         </Space>
@@ -127,19 +175,31 @@ const Task: React.FC = () => {
         </Card>
       )}
 
-      {progress && (
+      {(progress || isFailedWithProgress) && (
         <Card title="构建进度" style={{ marginBottom: 24 }}>
-          <Alert
-            type="info"
-            message={`第 ${progress.stepNumber} 步 - ${phaseLabels[progress.phase] || progress.phase}`}
-            description={progress.message}
-            showIcon
-          />
+          {isFailedWithProgress && !progress && (
+            <Alert
+              type="warning"
+              message="上次构建异常中断"
+              description={`已完成第 ${taskStatus.lastCompletedStep + 1} 步（${phaseLabels[taskStatus.lastCompletedPhase] || taskStatus.lastCompletedPhase}），可点击"断点续建"继续`}
+              showIcon
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          {progress && (
+            <Alert
+              type="info"
+              message={`第 ${progress.stepNumber} 步 - ${phaseLabels[progress.phase] || progress.phase}`}
+              description={progress.message}
+              showIcon
+            />
+          )}
           {taskStatus && (
             <div style={{ marginTop: 12 }}>
               <Progress
                 percent={taskStatus.totalSteps ? Math.round((taskStatus.currentStep / taskStatus.totalSteps) * 100) : 0}
                 format={() => `${taskStatus.currentStep || 0}/${taskStatus.totalSteps || '?'}`}
+                status={taskStatus.status === 'failed' ? 'exception' : undefined}
               />
             </div>
           )}

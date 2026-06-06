@@ -44,6 +44,13 @@ export async function taskRoutes(app: FastifyInstance) {
     reply.send({ success: true, message: '撤销回退功能需要配合快照恢复' });
   });
 
+  // 任务状态
+  app.get('/:id/task', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const task = await taskManagerService.getTaskStatus(id);
+    reply.send(task);
+  });
+
   // 构建进度（SSE）- 订阅 Redis 实时推送
   app.get('/:id/progress', async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as any;

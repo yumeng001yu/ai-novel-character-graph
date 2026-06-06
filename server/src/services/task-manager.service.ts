@@ -71,7 +71,18 @@ export class TaskManagerService {
       throw new Error('小说原文文件不存在，请重新上传');
     }
 
-    // 创建任务
+    // 如果之前失败的任务，支持断点续建
+    if (existing && existing.status === 'failed' && existing.lastCompletedStep !== undefined) {
+      // 重置状态为 running，从断点继续
+      await taskQueueRepo.updateStatus(novelId, 'running');
+      this.executeBuild(novelId, existing.lastCompletedStep, existing.lastCompletedPhase).catch(err => {
+        logger.error(err, '续建任务失败');
+        taskQueueRepo.updateStatus(novelId, 'failed');
+      });
+      return;
+    }
+
+    // 创建新任务
     const task: BuildTask = {
       novelId,
       status: 'running',
@@ -88,7 +99,7 @@ export class TaskManagerService {
     });
   }
 
-  private async executeBuild(novelId: string): Promise<void> {
+  private async executeBuild(novelId: string, resumeFromStep?: number, resumeFromPhase?: string): Promise<void> {
     const novel = await novelRepo.findById(novelId);
     if (!novel) return;
 
@@ -121,9 +132,35 @@ export class TaskManagerService {
 
     await novelRepo.updateStep(novelId, 0, totalSteps);
     await taskQueueRepo.updateProgress(novelId, 0);
+    await taskQueueRepo.updateTotalSteps(novelId, totalSteps);
+
+    // 确定从哪一步开始（断点续建）
+    let startStep = 0;
+    let skipPostProcessing = false;
+    if (resumeFromStep !== undefined && resumeFromStep !== null) {
+      if (resumeFromPhase === 'protagonist_detecting') {
+        // 所有步骤已完成，主角识别已完成，只需搜索索引
+        startStep = steps.length;
+        skipPostProcessing = true;
+        logger.info('断点续建：跳过所有步骤，从搜索索引开始');
+      } else if (resumeFromPhase === 'indexing') {
+        // 搜索索引也完成了，直接标记完成
+        startStep = steps.length;
+        skipPostProcessing = true;
+        logger.info('断点续建：所有步骤已完成，直接标记完成');
+      } else if (resumeFromPhase === 'step_completed' || resumeFromPhase === 'step_skipped') {
+        // 上一步完全完成，从下一步开始
+        startStep = resumeFromStep + 1;
+        logger.info(`断点续建：从第 ${startStep + 1} 步开始`);
+      } else {
+        // 上一步中途失败（如 extracting、disambiguating 等），从同一步重新开始
+        startStep = resumeFromStep;
+        logger.info(`断点续建：从第 ${startStep + 1} 步重新开始（上次完成阶段：${resumeFromPhase}）`);
+      }
+    }
 
     // 逐步构建
-    for (let i = 0; i < steps.length; i++) {
+    for (let i = startStep; i < steps.length; i++) {
       // 检查是否取消
       const task = await taskQueueRepo.getTask(novelId);
       if (task?.status === 'canceling') {
@@ -141,6 +178,7 @@ export class TaskManagerService {
 
       if (!stepText || stepText.trim().length === 0) {
         logger.warn(`步骤 ${i + 1} 无文本内容，跳过`);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'step_skipped');
         continue;
       }
 
@@ -154,6 +192,7 @@ export class TaskManagerService {
       // AI 提取
       const existingChars = (await characterRepo.findByNovelId(novelId)).map(c => c.name);
       const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars);
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'extracting');
 
       // 角色消歧
       await progressRepo.setProgress(novelId, {
@@ -162,6 +201,7 @@ export class TaskManagerService {
         message: '正在检测角色消歧...',
       });
       await characterDisambiguatorService.detectDisambiguations(novelId);
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'disambiguating');
 
       // 增量合并
       await progressRepo.setProgress(novelId, {
@@ -170,6 +210,7 @@ export class TaskManagerService {
         message: '正在合并图谱数据...',
       });
       const mergeResult = await mergerService.merge(novelId, i + 1, extraction, stepChapters[0]?.index || 1);
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'merging');
 
       // 冲突检测
       await progressRepo.setProgress(novelId, {
@@ -178,6 +219,7 @@ export class TaskManagerService {
         message: '正在检测冲突...',
       });
       await conflictDetectorService.detectAttributeConflicts(novelId);
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'conflict_detecting');
 
       // 更新角色档案
       await progressRepo.setProgress(novelId, {
@@ -192,6 +234,7 @@ export class TaskManagerService {
       for (const char of mergeResult.updatedCharacters) {
         await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
       }
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'profile_updating');
 
       // 保存快照
       await progressRepo.setProgress(novelId, {
@@ -204,20 +247,27 @@ export class TaskManagerService {
       // 更新步数
       await novelRepo.updateStep(novelId, i + 1, totalSteps);
       await taskQueueRepo.updateProgress(novelId, i + 1);
+      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'step_completed');
 
       logger.info(`步骤 ${i + 1}/${totalSteps} 完成：新增 ${mergeResult.newCharacters.length} 角色，${mergeResult.newRelations.length} 关系`);
     }
 
     // 主角识别
-    await progressRepo.setProgress(novelId, {
-      stepNumber: totalSteps,
-      phase: 'snapshot_saving',
-      message: '正在识别主角...',
-    });
-    await protagonistDetectorService.detectProtagonists(novelId);
+    if (resumeFromPhase === 'indexing') {
+      // 搜索索引已完成，直接标记完成
+    } else {
+      await progressRepo.setProgress(novelId, {
+        stepNumber: totalSteps,
+        phase: 'snapshot_saving',
+        message: '正在识别主角...',
+      });
+      await protagonistDetectorService.detectProtagonists(novelId);
+      await taskQueueRepo.updateLastCompletedStep(novelId, totalSteps - 1, 'protagonist_detecting');
+    }
 
     // 搜索索引
     await searchIndexerService.buildIndex(novelId);
+    await taskQueueRepo.updateLastCompletedStep(novelId, totalSteps - 1, 'indexing');
 
     // 完成
     await taskQueueRepo.updateStatus(novelId, 'completed');

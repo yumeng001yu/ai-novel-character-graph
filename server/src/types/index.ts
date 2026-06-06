@@ -173,6 +173,8 @@ export interface BuildTask {
   status: TaskStatus;
   currentStep: number;
   totalSteps: number;
+  lastCompletedStep?: number;
+  lastCompletedPhase?: string;
   startedAt?: string;
   completedAt?: string;
   error?: string;

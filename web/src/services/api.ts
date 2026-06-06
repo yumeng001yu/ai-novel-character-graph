@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: '/novelgraph/api',
   timeout: 30000,
 });
 
@@ -39,6 +39,7 @@ export const getSnapshotDiff = (novelId: string, step: number) =>
 // 任务
 export const startBuild = (novelId: string) => api.post(`/novels/${novelId}/build`);
 export const cancelBuild = (novelId: string) => api.post(`/novels/${novelId}/cancel`);
+export const getTaskStatus = (novelId: string) => api.get(`/novels/${novelId}/task`);
 export const rollback = (novelId: string, targetStep: number) =>
   api.post(`/novels/${novelId}/rollback`, { targetStep });
 export const getCostEstimate = (novelId: string) =>

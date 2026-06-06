@@ -43,6 +43,33 @@ export class TaskQueueRepo {
     await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, currentStep);
   }
 
+  async updateTotalSteps(novelId: string, totalSteps: number): Promise<void> {
+    const redis = getRedis();
+    const script = `
+      local data = redis.call('GET', KEYS[1])
+      if not data then return 0 end
+      local task = cjson.decode(data)
+      task.totalSteps = tonumber(ARGV[1])
+      redis.call('SET', KEYS[1], cjson.encode(task))
+      return 1
+    `;
+    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, totalSteps);
+  }
+
+  async updateLastCompletedStep(novelId: string, step: number, phase: string): Promise<void> {
+    const redis = getRedis();
+    const script = `
+      local data = redis.call('GET', KEYS[1])
+      if not data then return 0 end
+      local task = cjson.decode(data)
+      task.lastCompletedStep = tonumber(ARGV[1])
+      task.lastCompletedPhase = ARGV[2]
+      redis.call('SET', KEYS[1], cjson.encode(task))
+      return 1
+    `;
+    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, step, phase);
+  }
+
   async deleteTask(novelId: string): Promise<void> {
     const redis = getRedis();
     await redis.del(`${KEY_PREFIX}${novelId}`);
