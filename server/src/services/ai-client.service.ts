@@ -3,6 +3,7 @@ import { aiSettingsRepo } from '../repositories/file/ai-settings.repo';
 import { decrypt } from '../utils/crypto';
 import { getLogger } from '../utils/logger';
 import { getConfig } from '../config';
+import { AIContentRefusedError } from '../types';
 
 const logger = getLogger();
 
@@ -57,9 +58,35 @@ export async function callAI(prompt: string, systemPrompt?: string, retries?: nu
 
       const content = response.choices[0]?.message?.content;
       if (!content) throw new Error('AI 返回内容为空');
+
+      // 检测 AI 内容审核拒绝
+      // OpenAI 兼容 API 在内容被拒绝时 finish_reason 为 'content_filter'
+      const finishReason = response.choices[0]?.finish_reason;
+      if (finishReason === 'content_filter') {
+        throw new AIContentRefusedError('AI 模型内容审核过滤，该段文本可能包含被屏蔽的内容');
+      }
+
+      // 检测 AI 返回的 refusal 字段（OpenAI 格式）
+      const refusalField = (response.choices[0]?.message as any)?.refusal;
+      if (refusalField) {
+        throw new AIContentRefusedError(`AI 模型拒绝处理：${refusalField}`);
+      }
+
+      // 检测 AI 返回文本中的拒绝模式（不同模型拒绝格式不同）
+      const contentRefused = detectContentRefusal(content);
+      if (contentRefused) {
+        throw new AIContentRefusedError(contentRefused);
+      }
+
       return content;
     } catch (err: any) {
       lastError = err;
+
+      // AI 内容审核拒绝不可重试，直接抛出
+      if (err instanceof AIContentRefusedError) {
+        throw err;
+      }
+
       const isRetryable = err.status === 429 || err.status === 500 || err.status === 502 || err.code === 'ECONNRESET';
 
       if (!isRetryable || attempt === maxRetries) {
@@ -74,6 +101,64 @@ export async function callAI(prompt: string, systemPrompt?: string, retries?: nu
   }
 
   throw lastError;
+}
+
+/**
+ * 检测 AI 返回文本中的内容审核拒绝模式
+ * 不同模型/服务商的拒绝格式不同，需要覆盖多种情况
+ */
+function detectContentRefusal(content: string): string | null {
+  const trimmed = content.trim();
+
+  // 常见拒绝模式（中英文）
+  const refusalPatterns = [
+    // OpenAI 风格
+    /I('m| am) (unable|sorry|not able) to (process|complete|fulfill|assist|help|provide|generate|create)/i,
+    /I (cannot|can't|won't) (process|complete|fulfill|assist|help|provide|generate|create)/i,
+    /I (must|have to) (decline|refuse|reject)/i,
+    /this (request|content|text|material) (violates|goes against|is against|breaks)/i,
+    /content (policy|guideline|standard|filter|flag)/i,
+    /safety (policy|guideline|standard|concern|filter)/i,
+    /inappropriate (content|material|text)/i,
+    /I('ve| have) been (trained|programmed|designed) not to/i,
+    /not (appropriate|suitable|allowed|permitted) (for|to)/i,
+    /against my (guidelines|policy|rules|terms)/i,
+
+    // 中文拒绝模式
+    /我(无法|不能|不可以|没法|暂时无法|暂时不能)(处理|完成|提供|生成|创建|协助|帮助|回答)/,
+    /该(内容|文本|材料|请求)(违反|不符合|超出|触发了)(内容|安全|审核|社区)(政策|准则|规范|标准|策略)/,
+    /内容(审核|安全|合规)(不通过|未通过|被拦截|被过滤|被屏蔽)/,
+    /涉及(不良|敏感|违规|不当|有害)(信息|内容|材料)/,
+    /抱歉.*?(无法|不能|不可以)(处理|完成|提供|生成|协助)/,
+    /根据.*?(政策|准则|规范|规定|要求).*?(无法|不能|拒绝)/,
+    /已被(屏蔽|过滤|拦截|阻止)/,
+
+    // 通用模式：返回的是准则/声明而非 JSON
+    /^(?!.*[\[{]).*(?:policy|guideline|standard|准则|规范|政策|声明).*(?:cannot|unable|无法|不能)/is,
+  ];
+
+  for (const pattern of refusalPatterns) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return `AI 模型内容审核拒绝：${trimmed.substring(0, 200)}`;
+    }
+  }
+
+  // 额外检测：如果返回内容很短且不包含任何 JSON 结构，可能是拒绝
+  // （正常的提取结果应包含 JSON）
+  if (trimmed.length < 50 && !trimmed.includes('{') && !trimmed.includes('[')) {
+    const shortRefusalKeywords = [
+      'refused', 'rejected', 'blocked', 'filtered', 'flagged',
+      '拒绝', '屏蔽', '过滤', '拦截', '无法处理', '不能处理',
+    ];
+    for (const keyword of shortRefusalKeywords) {
+      if (trimmed.toLowerCase().includes(keyword)) {
+        return `AI 模型内容审核拒绝：${trimmed}`;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function getModelList(apiUrl: string, apiKey: string): Promise<{ id: string; name: string; contextLength?: number; tags: string[] }[]> {

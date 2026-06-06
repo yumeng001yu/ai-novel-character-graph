@@ -1,4 +1,4 @@
-import { Character } from '../types';
+import { Character, AIContentRefusedError } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
 import { callAI } from './ai-client.service';
 import { getLogger } from '../utils/logger';
@@ -25,7 +25,7 @@ ${charList}
 只返回主角，非主角不需要列出。`;
 
     try {
-      const response = await callAI(prompt, '你是小说分析专家，擅长判断主角。');
+      const response = await callAI(prompt, '你是小说分析专家，擅长判断主角。请只返回JSON格式数据。');
       const jsonMatch = response.match(/\[[\s\S]*\]/);
       if (!jsonMatch) throw new Error('AI 返回格式错误');
       const parsed = JSON.parse(jsonMatch[0]);
@@ -43,11 +43,16 @@ ${charList}
       logger.info(`主角识别完成：${protagonists.map(p => p.name).join('、')}`);
       return protagonists;
     } catch (err) {
-      logger.error(err, '主角识别失败');
-      // 回退：第一个角色作为主角
+      if (err instanceof AIContentRefusedError) {
+        logger.warn(`主角识别被 AI 内容审核拒绝，使用启发式回退：${err.reason}`);
+      } else {
+        logger.error(err, '主角识别失败');
+      }
+      // 回退：出场最早的角色作为主角
       if (characters.length > 0) {
-        await characterRepo.setProtagonist(characters[0].id, true, 1);
-        return [characters[0]];
+        const earliest = characters.reduce((a, b) => a.firstAppearChapter <= b.firstAppearChapter ? a : b);
+        await characterRepo.setProtagonist(earliest.id, true, 1);
+        return [earliest];
       }
       return [];
     }

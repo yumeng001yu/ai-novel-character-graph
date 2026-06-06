@@ -1,4 +1,4 @@
-import { BuildTask, TaskStatus, StepProgress } from '../types';
+import { BuildTask, TaskStatus, StepProgress, AIContentRefusedError } from '../types';
 import { taskQueueRepo } from '../repositories/redis/task-queue.repo';
 import { progressRepo } from '../repositories/redis/progress.repo';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
@@ -182,74 +182,93 @@ export class TaskManagerService {
         continue;
       }
 
-      // 更新进度：提取
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'extracting',
-        message: `正在提取第${i + 1}/${totalSteps}步的人物关系（${step.chaptersRange}）...`,
-      });
+      try {
+        // 更新进度：提取
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'extracting',
+          message: `正在提取第${i + 1}/${totalSteps}步的人物关系（${step.chaptersRange}）...`,
+        });
 
-      // AI 提取
-      const existingChars = (await characterRepo.findByNovelId(novelId)).map(c => c.name);
-      const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars);
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'extracting');
+        // AI 提取
+        const existingChars = (await characterRepo.findByNovelId(novelId)).map(c => c.name);
+        const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'extracting');
 
-      // 角色消歧
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'disambiguating',
-        message: '正在检测角色消歧...',
-      });
-      await characterDisambiguatorService.detectDisambiguations(novelId);
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'disambiguating');
+        // 角色消歧
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'disambiguating',
+          message: '正在检测角色消歧...',
+        });
+        await characterDisambiguatorService.detectDisambiguations(novelId);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'disambiguating');
 
-      // 增量合并
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'merging',
-        message: '正在合并图谱数据...',
-      });
-      const mergeResult = await mergerService.merge(novelId, i + 1, extraction, stepChapters[0]?.index || 1);
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'merging');
+        // 增量合并
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'merging',
+          message: '正在合并图谱数据...',
+        });
+        const mergeResult = await mergerService.merge(novelId, i + 1, extraction, stepChapters[0]?.index || 1);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'merging');
 
-      // 冲突检测
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'conflict_detecting',
-        message: '正在检测冲突...',
-      });
-      await conflictDetectorService.detectAttributeConflicts(novelId);
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'conflict_detecting');
+        // 冲突检测
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'conflict_detecting',
+          message: '正在检测冲突...',
+        });
+        await conflictDetectorService.detectAttributeConflicts(novelId);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'conflict_detecting');
 
-      // 更新角色档案
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'profile_updating',
-        message: '正在更新角色档案...',
-      });
-      for (const char of mergeResult.newCharacters) {
-        await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
+        // 更新角色档案
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'profile_updating',
+          message: '正在更新角色档案...',
+        });
+        for (const char of mergeResult.newCharacters) {
+          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
+        }
+        // 也更新已有角色中在本步出现的角色
+        for (const char of mergeResult.updatedCharacters) {
+          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
+        }
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'profile_updating');
+
+        // 保存快照
+        await progressRepo.setProgress(novelId, {
+          stepNumber: i + 1,
+          phase: 'snapshot_saving',
+          message: '正在保存快照...',
+        });
+        await snapshotService.saveSnapshot(novelId, i + 1, stepChapters.map(c => c.index));
+
+        // 更新步数
+        await novelRepo.updateStep(novelId, i + 1, totalSteps);
+        await taskQueueRepo.updateProgress(novelId, i + 1);
+        await taskQueueRepo.updateLastCompletedStep(novelId, i, 'step_completed');
+
+        logger.info(`步骤 ${i + 1}/${totalSteps} 完成：新增 ${mergeResult.newCharacters.length} 角色，${mergeResult.newRelations.length} 关系`);
+      } catch (err: any) {
+        if (err instanceof AIContentRefusedError) {
+          // AI 内容审核拒绝：跳过该步骤，继续下一步
+          logger.warn(`步骤 ${i + 1}（${step.chaptersRange}）AI 内容审核拒绝，跳过该步骤：${err.reason}`);
+          await progressRepo.setProgress(novelId, {
+            stepNumber: i + 1,
+            phase: 'extracting',
+            message: `步骤 ${i + 1}（${step.chaptersRange}）因 AI 内容审核被跳过：${err.reason}`,
+          });
+          await taskQueueRepo.updateLastCompletedStep(novelId, i, 'content_refused');
+          // 更新步数进度（即使跳过也算推进）
+          await novelRepo.updateStep(novelId, i + 1, totalSteps);
+          await taskQueueRepo.updateProgress(novelId, i + 1);
+          continue;
+        }
+        // 其他错误：抛出，让外层 catch 处理
+        throw err;
       }
-      // 也更新已有角色中在本步出现的角色
-      for (const char of mergeResult.updatedCharacters) {
-        await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange);
-      }
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'profile_updating');
-
-      // 保存快照
-      await progressRepo.setProgress(novelId, {
-        stepNumber: i + 1,
-        phase: 'snapshot_saving',
-        message: '正在保存快照...',
-      });
-      await snapshotService.saveSnapshot(novelId, i + 1, stepChapters.map(c => c.index));
-
-      // 更新步数
-      await novelRepo.updateStep(novelId, i + 1, totalSteps);
-      await taskQueueRepo.updateProgress(novelId, i + 1);
-      await taskQueueRepo.updateLastCompletedStep(novelId, i, 'step_completed');
-
-      logger.info(`步骤 ${i + 1}/${totalSteps} 完成：新增 ${mergeResult.newCharacters.length} 角色，${mergeResult.newRelations.length} 关系`);
     }
 
     // 主角识别
