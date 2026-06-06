@@ -364,3 +364,14 @@ export interface GraphQueryParams {
   center?: string;
   step?: number;
 }
+
+
+// ===== 自定义错误 =====
+export class AIContentRefusedError extends Error {
+  reason: string;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIContentRefusedError';
+    this.reason = message;
+  }
+}
