@@ -1,5 +1,5 @@
 import { Chapter, Step } from '../types';
-import { estimateTokens, calculateAvailableInputTokens } from '../utils/token-counter';
+import { calculateAvailableInputTokens } from '../utils/token-counter';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';
 
@@ -16,7 +16,7 @@ export class StepPlannerService {
     let currentStepTokens = 0;
 
     for (const chapter of chapters) {
-      const chapterTokens = chapter.tokenCount || estimateTokens('x'.repeat(chapter.charCount));
+      const chapterTokens = chapter.tokenCount;
 
       if (currentStepTokens + chapterTokens > availableTokens && currentStepChapters.length > 0) {
         // 加入此章会超限，当前步截止
@@ -41,7 +41,7 @@ export class StepPlannerService {
   private createStep(stepNumber: number, chapters: Chapter[]): Step {
     const firstChapter = chapters[0].index;
     const lastChapter = chapters[chapters.length - 1].index;
-    const totalTokens = chapters.reduce((sum, c) => sum + (c.tokenCount || estimateTokens('x'.repeat(c.charCount))), 0);
+    const totalTokens = chapters.reduce((sum, c) => sum + (c.tokenCount || 0), 0);
     const totalChars = chapters.reduce((sum, c) => sum + c.charCount, 0);
 
     return {

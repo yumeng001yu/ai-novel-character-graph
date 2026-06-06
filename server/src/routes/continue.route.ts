@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { duplicateDetectorService } from '../services/duplicate-detector.service';
-import { readFileWithEncoding } from '../utils/encoding-detector';
+import { decodeBuffer } from '../utils/encoding-detector';
 
 export async function continueRoutes(app: FastifyInstance) {
   // 续建前检查
@@ -17,7 +17,7 @@ export async function continueRoutes(app: FastifyInstance) {
     if (!data) return reply.status(400).send({ error: '未上传文件' });
 
     const buffer = await data.toBuffer();
-    const text = buffer.toString('utf-8');
+    const text = decodeBuffer(buffer);
 
     // 检测重复
     const duplicateResult = await duplicateDetectorService.detectDuplicate(id, text);

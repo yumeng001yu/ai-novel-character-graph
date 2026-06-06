@@ -31,9 +31,20 @@ export class SettingsService {
   }
 
   async saveAiConfig(req: SaveAiConfigRequest): Promise<void> {
+    const existing = await aiSettingsRepo.load();
+
+    // 如果 apiKey 为空或看起来是 masked 值，保留原有 key
+    let apiKeyEncrypted: string;
+    if (!req.apiKey || req.apiKey.includes('***')) {
+      if (!existing) throw new Error('首次配置必须提供 API Key');
+      apiKeyEncrypted = existing.apiKeyEncrypted;
+    } else {
+      apiKeyEncrypted = encrypt(req.apiKey);
+    }
+
     const config: AiConfig = {
       apiUrl: req.apiUrl,
-      apiKeyEncrypted: encrypt(req.apiKey),
+      apiKeyEncrypted,
       model: req.model,
       contextSize: req.contextSize || getConfig().build.default_context_size,
       temperature: req.temperature ?? 0.3,

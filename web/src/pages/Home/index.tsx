@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Upload, Button, Input, Radio, Table, message, Space, Modal } from 'antd';
+import { Card, Upload, Button, Input, Radio, Table, message, Modal } from 'antd';
 import { InboxOutlined, FileTextOutlined } from '@ant-design/icons';
 import { uploadNovel, textPaste, getNovels } from '../../services/api';
 
@@ -17,8 +17,12 @@ const Home: React.FC = () => {
   useEffect(() => { loadNovels(); }, []);
 
   const loadNovels = async () => {
-    const res = await getNovels();
-    setNovels(res.data);
+    try {
+      const res = await getNovels();
+      setNovels(res.data || []);
+    } catch (err) {
+      message.error('加载小说列表失败');
+    }
   };
 
   const handleUpload = async (file: File) => {
@@ -40,7 +44,7 @@ const Home: React.FC = () => {
     if (!pasteContent.trim()) return message.warning('请输入内容');
     setLoading(true);
     try {
-      const res = await textPaste({ content: pasteContent, novelName: pasteName });
+      await textPaste({ content: pasteContent, novelName: pasteName });
       message.success(`创建成功！`);
       setPasteVisible(false);
       loadNovels();

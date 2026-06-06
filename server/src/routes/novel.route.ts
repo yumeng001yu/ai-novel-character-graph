@@ -28,16 +28,21 @@ export async function novelRoutes(app: FastifyInstance) {
 
     const aiConfig = await settingsService.getAiConfig();
     const contextSize = aiConfig?.contextSize || getConfig().build.default_context_size;
+    const encoding = aiConfig?.model ? getEncodingForModel(aiConfig.model) : 'cl100k_base';
 
     const novel = await novelRepo.create({
       name: data.filename.replace('.txt', ''),
       totalChars: text.replace(/\s/g, '').length,
-      totalTokens: estimateTokens(text),
+      totalTokens: estimateTokens(text, encoding),
       inputMode: hasChapter ? 'file_chapter' : 'file_no_chapter',
       contextSize,
     });
 
     // 保存原文到文件（供后续构建时读取）
+    // 安全校验：novel.id 由 uuid 生成，但仍然检查
+    if (novel.id.includes('/') || novel.id.includes('\\') || novel.id.includes('..')) {
+      return reply.status(400).send({ error: '无效的小说ID' });
+    }
     const novelDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', novel.id);
     if (!fs.existsSync(novelDir)) fs.mkdirSync(novelDir, { recursive: true });
     fs.writeFileSync(path.join(novelDir, 'original.txt'), text, 'utf-8');
@@ -50,8 +55,7 @@ export async function novelRoutes(app: FastifyInstance) {
       chapters = await semanticSegmenterService.segment(text, novel.id, contextSize);
     }
 
-    // 为每个章节计算 Token 数
-    const encoding = aiConfig?.model ? getEncodingForModel(aiConfig.model) : 'cl100k_base';
+    // 为每个章节计算 Token 数（使用与 totalTokens 相同的编码）
     for (let i = 0; i < chapters.length; i++) {
       const ch = chapters[i];
       // 使用当前章节到下一章节的文本（而非 startOffset + charCount，因为 charCount 是去空格后的）
@@ -91,6 +95,9 @@ export async function novelRoutes(app: FastifyInstance) {
     });
 
     // 保存原文
+    if (novel.id.includes('/') || novel.id.includes('\\') || novel.id.includes('..')) {
+      return reply.status(400).send({ error: '无效的小说ID' });
+    }
     const novelDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', novel.id);
     if (!fs.existsSync(novelDir)) fs.mkdirSync(novelDir, { recursive: true });
     fs.writeFileSync(path.join(novelDir, 'original.txt'), content, 'utf-8');

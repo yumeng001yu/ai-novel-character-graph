@@ -3,6 +3,7 @@ import { taskManagerService } from '../services/task-manager.service';
 import { rollbackService } from '../services/rollback.service';
 import { costEstimatorService } from '../services/cost-estimator.service';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
+import { getRedis } from '../repositories/redis/connection';
 
 export async function taskRoutes(app: FastifyInstance) {
   // 启动构建
@@ -40,11 +41,10 @@ export async function taskRoutes(app: FastifyInstance) {
 
   // 撤销回退
   app.post('/:id/rollback/:step/undo', async (req: FastifyRequest, reply: FastifyReply) => {
-    // 简化：重新加载快照
     reply.send({ success: true, message: '撤销回退功能需要配合快照恢复' });
   });
 
-  // 构建进度（SSE）
+  // 构建进度（SSE）- 订阅 Redis 实时推送
   app.get('/:id/progress', async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as any;
 
@@ -52,22 +52,44 @@ export async function taskRoutes(app: FastifyInstance) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
     });
 
-    // 轮询进度
-    const interval = setInterval(async () => {
-      const progress = await taskManagerService.getProgress(id);
-      const task = await taskManagerService.getTaskStatus(id);
+    // 创建 Redis 订阅者
+    const subscriber = getRedis().duplicate();
+    const channel = `progress:${id}`;
 
-      reply.raw.write(`data: ${JSON.stringify({ progress, task })}\n\n`);
+    subscriber.on('message', (ch: string, message: string) => {
+      if (ch !== channel) return;
+      try {
+        const data = JSON.parse(message);
+        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
 
-      if (task && (task.status === 'completed' || task.status === 'failed' || task.status === 'canceled')) {
-        clearInterval(interval);
-        reply.raw.end();
+        // 任务完成/失败/取消时关闭连接
+        if (data.task && ['completed', 'failed', 'canceled'].includes(data.task.status)) {
+          subscriber.unsubscribe(channel);
+          subscriber.quit();
+          reply.raw.end();
+        }
+      } catch {
+        // 忽略解析错误
       }
-    }, 2000);
+    });
 
-    req.raw.on('close', () => clearInterval(interval));
+    await subscriber.subscribe(channel);
+
+    // 立即发送当前状态
+    const progress = await taskManagerService.getProgress(id);
+    const task = await taskManagerService.getTaskStatus(id);
+    if (progress || task) {
+      reply.raw.write(`data: ${JSON.stringify({ progress, task })}\n\n`);
+    }
+
+    // 客户端断开时清理
+    req.raw.on('close', () => {
+      subscriber.unsubscribe(channel);
+      subscriber.quit();
+    });
   });
 
   // 成本预估

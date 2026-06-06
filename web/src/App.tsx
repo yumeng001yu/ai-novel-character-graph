@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu } from 'antd';
 import { BookOutlined, ApartmentOutlined, UserOutlined, SettingOutlined, ThunderboltOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import Home from './pages/Home';
@@ -11,8 +11,28 @@ import Settings from './pages/Settings';
 
 const { Header, Content } = Layout;
 
+const menuItems = [
+  { key: 'home', icon: <CloudUploadOutlined />, label: '首页', path: '/' },
+  { key: 'graph', icon: <ApartmentOutlined />, label: '图谱', path: '/graph' },
+  { key: 'character', icon: <UserOutlined />, label: '角色', path: '/character' },
+  { key: 'continue', icon: <BookOutlined />, label: '续建', path: '/continue' },
+  { key: 'task', icon: <ThunderboltOutlined />, label: '任务', path: '/task' },
+  { key: 'settings', icon: <SettingOutlined />, label: '设置', path: '/settings' },
+];
+
+const pathToKey: Record<string, string> = {
+  '/': 'home',
+  '/graph': 'graph',
+  '/character': 'character',
+  '/continue': 'continue',
+  '/task': 'task',
+  '/settings': 'settings',
+};
+
 const App: React.FC = () => {
-  const [current, setCurrent] = React.useState('home');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentKey = pathToKey[location.pathname] || 'home';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -23,16 +43,12 @@ const App: React.FC = () => {
         <Menu
           theme="dark"
           mode="horizontal"
-          selectedKeys={[current]}
-          onClick={(e) => setCurrent(e.key)}
-          items={[
-            { key: 'home', icon: <CloudUploadOutlined />, label: '首页' },
-            { key: 'graph', icon: <ApartmentOutlined />, label: '图谱' },
-            { key: 'character', icon: <UserOutlined />, label: '角色' },
-            { key: 'continue', icon: <BookOutlined />, label: '续建' },
-            { key: 'task', icon: <ThunderboltOutlined />, label: '任务' },
-            { key: 'settings', icon: <SettingOutlined />, label: '设置' },
-          ]}
+          selectedKeys={[currentKey]}
+          onClick={(e) => {
+            const item = menuItems.find(m => m.key === e.key);
+            if (item) navigate(item.path);
+          }}
+          items={menuItems}
         />
       </Header>
       <Content style={{ padding: '24px', background: '#f5f5f5' }}>

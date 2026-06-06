@@ -32,6 +32,7 @@ services:
       - NODE_ENV=production
     volumes:
       - ./server/config.yaml:/app/config.yaml
+      - config_data:/app/config
       - ./output:/app/output
       - ./logs:/app/logs
     depends_on:
@@ -53,3 +54,4 @@ volumes:
   neo4j_data:
   neo4j_logs:
   redis_data:
+  config_data:

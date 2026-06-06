@@ -30,7 +30,7 @@ export class AiSettingsRepo {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 });
   }
 }
 

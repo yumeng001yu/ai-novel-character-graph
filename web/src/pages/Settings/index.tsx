@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Select, InputNumber, Switch, message, Space, Alert, Divider, Tag } from 'antd';
+import { Card, Form, Input, Button, Select, InputNumber, Switch, message, Space, Alert, Tag } from 'antd';
 import { getAiConfig, saveAiConfig, testAiConnection, getModels, getBuildConfig, saveBuildConfig } from '../../services/api';
 
 const Settings: React.FC = () => {
@@ -16,50 +16,88 @@ const Settings: React.FC = () => {
   }, []);
 
   const loadAiConfig = async () => {
-    const res = await getAiConfig();
-    if (res.data.configured === false) {
-      setConfigured(false);
-      return;
+    try {
+      const res = await getAiConfig();
+      if (res.data.configured === false) {
+        setConfigured(false);
+        return;
+      }
+      setConfigured(true);
+      // 注意：不设置 apiKey 字段（后端返回的是 apiKeyMasked，不是真实 key）
+      // 用户需要重新输入 API Key 才能更新
+      aiForm.setFieldsValue({
+        apiUrl: res.data.apiUrl,
+        model: res.data.model,
+        contextSize: res.data.contextSize,
+        temperature: res.data.temperature,
+        maxTokens: res.data.maxTokens,
+      });
+    } catch (err) {
+      message.error('加载AI配置失败');
     }
-    setConfigured(true);
-    aiForm.setFieldsValue(res.data);
   };
 
   const loadBuildConfig = async () => {
-    const res = await getBuildConfig();
-    buildForm.setFieldsValue(res.data);
+    try {
+      const res = await getBuildConfig();
+      buildForm.setFieldsValue(res.data);
+    } catch (err) {
+      message.error('加载构建配置失败');
+    }
   };
 
   const handleGetModels = async () => {
-    const values = await aiForm.validateFields(['apiUrl', 'apiKey']);
-    setLoadingModels(true);
     try {
-      const res = await getModels(values.apiUrl, values.apiKey);
-      setModels(res.data.models);
-      message.success(`发现 ${res.data.models.length} 个模型`);
-    } catch (err: any) {
-      message.error('获取模型列表失败');
+      const values = await aiForm.validateFields(['apiUrl', 'apiKey']);
+      setLoadingModels(true);
+      try {
+        const res = await getModels(values.apiUrl, values.apiKey);
+        setModels(res.data.models || []);
+        message.success(`发现 ${(res.data.models || []).length} 个模型`);
+      } catch (err: any) {
+        message.error('获取模型列表失败: ' + (err.response?.data?.error || err.message));
+      }
+      setLoadingModels(false);
+    } catch (err) {
+      // 表单验证失败
     }
-    setLoadingModels(false);
   };
 
   const handleTest = async () => {
-    const values = await aiForm.validateFields(['apiUrl', 'apiKey']);
-    const res = await testAiConnection(values.apiUrl, values.apiKey);
-    setTestResult(res.data);
+    try {
+      const values = await aiForm.validateFields(['apiUrl', 'apiKey']);
+      try {
+        const res = await testAiConnection(values.apiUrl, values.apiKey);
+        setTestResult(res.data);
+      } catch (err: any) {
+        setTestResult({ success: false, message: '连接失败: ' + (err.response?.data?.error || err.message) });
+      }
+    } catch (err) {
+      // 表单验证失败
+    }
   };
 
   const handleSaveAi = async () => {
-    const values = await aiForm.validateFields();
-    await saveAiConfig(values);
-    message.success('AI 配置已保存');
-    setConfigured(true);
+    try {
+      const values = await aiForm.validateFields();
+      await saveAiConfig(values);
+      message.success('AI 配置已保存');
+      setConfigured(true);
+    } catch (err: any) {
+      if (err.response?.data?.error) {
+        message.error(err.response.data.error);
+      }
+    }
   };
 
   const handleSaveBuild = async () => {
-    const values = await buildForm.getFieldsValue();
-    await saveBuildConfig(values);
-    message.success('构建配置已保存');
+    try {
+      const values = await buildForm.getFieldsValue();
+      await saveBuildConfig(values);
+      message.success('构建配置已保存');
+    } catch (err: any) {
+      message.error('保存构建配置失败');
+    }
   };
 
   return (
@@ -71,8 +109,8 @@ const Settings: React.FC = () => {
           <Form.Item label="API 地址" name="apiUrl" rules={[{ required: true, message: '请输入API地址' }]}>
             <Input placeholder="如 https://api.openai.com/v1" />
           </Form.Item>
-          <Form.Item label="API Key" name="apiKey" rules={[{ required: true, message: '请输入API Key' }]}>
-            <Input.Password placeholder="sk-..." />
+          <Form.Item label="API Key" name="apiKey" rules={[{ required: !configured, message: '请输入API Key' }]}>
+            <Input.Password placeholder={configured ? '留空则保持原有Key' : 'sk-...'} />
           </Form.Item>
           <Form.Item>
             <Space>
@@ -85,7 +123,7 @@ const Settings: React.FC = () => {
           </Form.Item>
           <Form.Item label="选择模型" name="model" rules={[{ required: true }]}>
             <Select placeholder="先获取模型列表" options={models.map(m => ({
-              label: <span>{m.name} {m.tags.map((t: string) => <Tag key={t} color="blue">{t}</Tag>)}</span>,
+              label: <span>{m.name} {m.tags?.map((t: string) => <Tag key={t} color="blue">{t}</Tag>)}</span>,
               value: m.id,
             }))} />
           </Form.Item>

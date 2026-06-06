@@ -1,5 +1,6 @@
 import { getRedis } from './connection';
 import { StepProgress } from '../../types';
+import { taskQueueRepo } from './task-queue.repo';
 
 const KEY_PREFIX = 'progress:';
 
@@ -7,8 +8,9 @@ export class ProgressRepo {
   async setProgress(novelId: string, progress: StepProgress): Promise<void> {
     const redis = getRedis();
     await redis.set(`${KEY_PREFIX}${novelId}`, JSON.stringify(progress));
-    // 发布进度更新事件
-    await redis.publish(`progress:${novelId}`, JSON.stringify(progress));
+    // 发布进度更新事件（包含 task 信息供 SSE 使用）
+    const task = await taskQueueRepo.getTask(novelId);
+    await redis.publish(`progress:${novelId}`, JSON.stringify({ progress, task }));
   }
 
   async getProgress(novelId: string): Promise<StepProgress | null> {

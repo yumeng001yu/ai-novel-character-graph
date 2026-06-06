@@ -23,7 +23,7 @@ export class RelationRepo {
     try {
       const result = await session.run(
         `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c1:Character)-[r:RELATES_TO]->(c2:Character)
-         WHERE c2.novelId = $novelId
+         MATCH (n)-[:HAS_CHARACTER]->(c2)
          RETURN c1.id AS sourceId, c2.id AS targetId, r`,
         { novelId }
       );

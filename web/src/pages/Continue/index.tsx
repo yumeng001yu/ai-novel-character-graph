@@ -1,21 +1,39 @@
-import React, { useState } from 'react';
-import { Card, Upload, Input, Button, message, Descriptions, Alert } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Card, Upload, Input, Button, message, Alert, Select, Space } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
-import { continueUpload, continuePaste, continueCheck } from '../../services/api';
+import { continueUpload, continuePaste, continueCheck, getNovels } from '../../services/api';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
 
 const Continue: React.FC = () => {
-  const [novelId, setNovelId] = useState('');
+  const [novels, setNovels] = useState<any[]>([]);
+  const [novelId, setNovelId] = useState<string>('');
   const [pasteContent, setPasteContent] = useState('');
   const [checkResult, setCheckResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    loadNovels();
+  }, []);
+
+  const loadNovels = async () => {
+    try {
+      const res = await getNovels();
+      setNovels(res.data || []);
+    } catch (err) {
+      message.error('加载小说列表失败');
+    }
+  };
+
   const handleCheck = async () => {
-    if (!novelId) return message.warning('请输入小说ID');
-    const res = await continueCheck(novelId);
-    setCheckResult(res.data);
+    if (!novelId) return message.warning('请选择小说');
+    try {
+      const res = await continueCheck(novelId);
+      setCheckResult(res.data);
+    } catch (err: any) {
+      message.error(err.response?.data?.error || '检查失败');
+    }
   };
 
   const handleUpload = async (file: File) => {
@@ -34,7 +52,7 @@ const Continue: React.FC = () => {
   };
 
   const handlePaste = async () => {
-    if (!novelId || !pasteContent) return message.warning('请填写小说ID和内容');
+    if (!novelId || !pasteContent) return message.warning('请选择小说并输入内容');
     setLoading(true);
     try {
       const res = await continuePaste(novelId, pasteContent);
@@ -49,8 +67,12 @@ const Continue: React.FC = () => {
   return (
     <div>
       <Card title="继承续建" style={{ marginBottom: 24 }}>
-        <Input placeholder="输入小说ID" value={novelId} onChange={e => setNovelId(e.target.value)} style={{ width: 300, marginBottom: 16 }} />
-        <Button type="primary" onClick={handleCheck} style={{ marginLeft: 8 }}>检查</Button>
+        <Space>
+          <Select style={{ width: 250 }} placeholder="选择小说" value={novelId || undefined}
+            onChange={setNovelId}
+            options={novels.map((n: any) => ({ label: n.name, value: n.id }))} />
+          <Button type="primary" onClick={handleCheck} disabled={!novelId}>检查</Button>
+        </Space>
       </Card>
 
       <Card title="上传续建文件" style={{ marginBottom: 24 }}>

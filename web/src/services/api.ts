@@ -6,8 +6,10 @@ const api = axios.create({
 });
 
 // 小说
-export const uploadNovel = (formData: FormData, hasChapter: boolean) =>
-  api.post(`/novels/upload?has_chapter=${hasChapter}`, formData);
+export const uploadNovel = (formData: FormData, hasChapter: boolean) => {
+  formData.append('has_chapter', String(hasChapter));
+  return api.post('/novels/upload', formData);
+};
 export const textPaste = (data: { content: string; novelName?: string }) =>
   api.post('/novels/text-paste', data);
 export const getNovels = () => api.get('/novels');

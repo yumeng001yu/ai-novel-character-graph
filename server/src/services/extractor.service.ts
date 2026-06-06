@@ -82,9 +82,21 @@ ${text}`;
     const response = await callAI(prompt, '你是一个小说分析专家，擅长提取人物关系和事件。请只返回JSON，不要其他内容。');
 
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('AI 返回格式错误');
-      return JSON.parse(jsonMatch[0]) as ExtractionResult;
+      // 尝试提取 JSON：先去除可能的 markdown 代码块标记
+      let cleaned = response.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('AI 返回格式错误：未找到 JSON');
+      const parsed = JSON.parse(jsonMatch[0]);
+      // 验证必要字段存在
+      return {
+        characters: Array.isArray(parsed.characters) ? parsed.characters : [],
+        relations: Array.isArray(parsed.relations) ? parsed.relations : [],
+        events: Array.isArray(parsed.events) ? parsed.events : [],
+        inferences: Array.isArray(parsed.inferences) ? parsed.inferences : [],
+      } as ExtractionResult;
     } catch (err) {
       logger.error({ err, response }, 'AI 提取结果解析失败');
       return { characters: [], relations: [], events: [], inferences: [] };

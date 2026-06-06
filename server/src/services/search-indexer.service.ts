@@ -32,6 +32,10 @@ export class SearchIndexerService {
   }
 
   private getIndexPath(novelId: string): string {
+    // 安全校验：防止路径遍历
+    if (novelId.includes('/') || novelId.includes('\\') || novelId.includes('..')) {
+      throw new Error('无效的小说ID');
+    }
     const config = getConfig();
     return path.resolve(config.build.snapshot_dir, '..', 'search_index', `${novelId}.json`);
   }

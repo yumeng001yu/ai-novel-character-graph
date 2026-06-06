@@ -27,6 +27,10 @@ const logger = getLogger();
  * 获取小说原文文件路径
  */
 function getNovelTextPath(novelId: string): string {
+  // 安全校验：防止路径遍历
+  if (novelId.includes('/') || novelId.includes('\\') || novelId.includes('..')) {
+    throw new Error('无效的小说ID');
+  }
   return path.resolve(getConfig().build.snapshot_dir, '..', 'novels', novelId, 'original.txt');
 }
 
@@ -133,7 +137,7 @@ export class TaskManagerService {
 
       // 根据步的章节范围，从原文中提取对应文本
       const stepChapters = this.getStepChapters(step.chaptersRange, chapters);
-      const stepText = this.extractStepText(fullText, stepChapters);
+      const stepText = this.extractStepText(fullText, stepChapters, chapters);
 
       if (!stepText || stepText.trim().length === 0) {
         logger.warn(`步骤 ${i + 1} 无文本内容，跳过`);
@@ -235,20 +239,20 @@ export class TaskManagerService {
   /**
    * 从原文中提取指定章节的文本
    */
-  private extractStepText(fullText: string, stepChapters: any[]): string {
+  private extractStepText(fullText: string, stepChapters: any[], allChapters?: any[]): string {
     if (stepChapters.length === 0) return fullText;
 
     const firstChapter = stepChapters[0];
     const lastChapter = stepChapters[stepChapters.length - 1];
     const startOffset = firstChapter.startOffset;
 
-    // 结束位置：下一章的开始位置，或全文末尾
-    let endOffset: number;
-    if (lastChapter.index === stepChapters[stepChapters.length - 1]?.index) {
-      // 使用最后一章的 startOffset + charCount 作为近似结束位置
-      endOffset = lastChapter.startOffset + lastChapter.charCount + 200; // 多取一些避免截断
-    } else {
-      endOffset = fullText.length;
+    // 结束位置：找到最后一章的下一章的 startOffset，否则用全文末尾
+    let endOffset = fullText.length;
+    if (allChapters) {
+      const nextChapter = allChapters.find(c => c.index === lastChapter.index + 1);
+      if (nextChapter) {
+        endOffset = nextChapter.startOffset;
+      }
     }
 
     return fullText.substring(startOffset, Math.min(endOffset, fullText.length));

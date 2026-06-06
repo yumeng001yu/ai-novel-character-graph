@@ -15,6 +15,7 @@ export interface Novel {
 }
 
 export interface Chapter {
+  id: string;
   index: number;
   title: string;
   startOffset: number;

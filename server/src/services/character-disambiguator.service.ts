@@ -86,43 +86,10 @@ ${charList}
 
   /**
    * 合并角色：将 mergeIds 的角色合并到 primaryId
-   * 被合并角色的所有关系转移到主角色，被合并角色被删除
+   * 委托给 characterRepo.mergeCharacters 处理（已正确实现边属性转移）
    */
   async mergeCharacters(primaryId: string, mergeIds: string[]): Promise<void> {
-    const session = getSession();
-    try {
-      const tx = session.beginTransaction();
-
-      for (const mergeId of mergeIds) {
-        // 将被合并角色的出边转移到主角色
-        await tx.run(
-          `MATCH (c1:Character {id: $mergeId})-[r:RELATES_TO]->(c2)
-           CREATE (c3:Character {id: $primaryId})-[:RELATES_TO]->(c2)
-           SET c3 += properties(r)`,
-          { mergeId, primaryId }
-        );
-        // 将被合并角色的入边转移到主角色
-        await tx.run(
-          `MATCH (c2)-[r:RELATES_TO]->(c1:Character {id: $mergeId})
-           CREATE (c2)-[:RELATES_TO]->(c3:Character {id: $primaryId})
-           SET c3 += properties(r)`,
-          { mergeId, primaryId }
-        );
-        // 将被合并角色的别名添加到主角色
-        await tx.run(
-          `MATCH (primary:Character {id: $primaryId}), (merge:Character {id: $mergeId})
-           SET primary.aliases = primary.aliases + merge.name`,
-          { primaryId, mergeId }
-        );
-        // 删除被合并角色
-        await tx.run(`MATCH (c:Character {id: $mergeId}) DETACH DELETE c`, { mergeId });
-      }
-
-      await tx.commit();
-    } finally {
-      await session.close();
-    }
-
+    await characterRepo.mergeCharacters(primaryId, mergeIds);
     logger.info(`角色合并完成：${mergeIds.join(',')} → ${primaryId}`);
   }
 

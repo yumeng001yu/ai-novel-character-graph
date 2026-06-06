@@ -45,24 +45,28 @@ export function encrypt(text: string): string {
 }
 
 export function decrypt(encryptedText: string): string {
-  const key = getKey();
-  const parts = encryptedText.split(':');
+  try {
+    const key = getKey();
+    const parts = encryptedText.split(':');
 
-  if (parts.length !== 3) {
-    throw new Error('Invalid encrypted text format');
+    if (parts.length !== 3) {
+      throw new Error('Invalid encrypted text format');
+    }
+
+    const iv = Buffer.from(parts[0], 'hex');
+    const tag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(tag);
+
+    let decrypted = decipher.update(encrypted, 'hex', 'utf-8');
+    decrypted += decipher.final('utf-8');
+
+    return decrypted;
+  } catch (err: any) {
+    throw new Error(`Decryption failed: ${err.message}`);
   }
-
-  const iv = Buffer.from(parts[0], 'hex');
-  const tag = Buffer.from(parts[1], 'hex');
-  const encrypted = parts[2];
-
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
-
-  let decrypted = decipher.update(encrypted, 'hex', 'utf-8');
-  decrypted += decipher.final('utf-8');
-
-  return decrypted;
 }
 
 export function maskApiKey(apiKey: string): string {

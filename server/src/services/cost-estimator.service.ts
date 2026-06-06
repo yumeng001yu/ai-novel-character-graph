@@ -1,11 +1,7 @@
 import { CostEstimate } from '../types';
 import { chapterRepo } from '../repositories/neo4j/chapter.repo';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
-import { estimateTokens } from '../utils/token-counter';
 import { calculateAvailableInputTokens } from '../utils/token-counter';
-import fs from 'fs';
-import path from 'path';
-import { getConfig } from '../config';
 
 export class CostEstimatorService {
   async estimate(novelId: string): Promise<CostEstimate> {
@@ -14,9 +10,9 @@ export class CostEstimatorService {
 
     const chapters = await chapterRepo.findByNovelId(novelId);
 
-    // 使用已存储的 tokenCount（如果有的话），否则用总 token 数按步均分
+    // 使用已存储的 tokenCount，如果 tokenCount 为 0 则跳过该章节（数据不完整）
     const totalTokens = chapters.reduce(
-      (sum, c) => sum + (c.tokenCount > 0 ? c.tokenCount : Math.ceil(c.charCount * 2.5)),
+      (sum, c) => sum + (c.tokenCount > 0 ? c.tokenCount : 0),
       0
     );
 

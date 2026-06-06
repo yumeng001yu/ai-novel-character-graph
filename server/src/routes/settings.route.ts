@@ -12,7 +12,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // 保存 AI 配置
   app.put('/ai', async (req: FastifyRequest, reply: FastifyReply) => {
     const data = req.body as any;
-    if (!data.apiUrl || !data.apiKey || !data.model) {
+    if (!data.apiUrl || !data.model) {
       return reply.status(400).send({ error: '缺少必要参数' });
     }
     await settingsService.saveAiConfig(data);

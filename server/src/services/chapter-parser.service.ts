@@ -96,14 +96,27 @@ ${preview}`;
     const response = await callAI(prompt, '你是一个小说文本分析专家，擅长识别小说章节结构。');
 
     try {
-      const matches = response.match(/\[[\s\S]*\]/);
+      // 去除可能的 markdown 代码块标记
+      let cleaned = response.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      const matches = cleaned.match(/\[[\s\S]*\]/);
       if (!matches) throw new Error('AI 返回格式错误');
       const parsed = JSON.parse(matches[0]);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error('AI 返回空数组');
+      }
 
       const chapters: Chapter[] = [];
       for (let i = 0; i < parsed.length; i++) {
         const startText = parsed[i].startText || '';
-        const startOffset = startText ? text.indexOf(startText) : (i > 0 ? chapters[i-1].startOffset + chapters[i-1].charCount : 0);
+        let startOffset = startText ? text.indexOf(startText) : -1;
+        // 如果找不到精确匹配，使用上一章末尾作为开始位置
+        if (startOffset === -1) {
+          startOffset = i > 0 && chapters[i-1] ? chapters[i-1].startOffset + chapters[i-1].charCount : 0;
+        }
 
         chapters.push({
           id: uuid(),
