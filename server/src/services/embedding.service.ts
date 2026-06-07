@@ -88,13 +88,15 @@ export class EmbeddingService {
     const apiKey = decrypt(config.apiKeyEncrypted);
     const apiUrl = config.apiUrl.replace(/\/+$/, '');
 
+    const body: any = {
+      model: config.model,
+      input: text,
+    };
+    if (config.dimensions) body.dimensions = config.dimensions;
+
     const response = await axios.post(
       `${apiUrl}/embeddings`,
-      {
-        model: config.model,
-        input: text,
-        dimensions: config.dimensions,
-      },
+      body,
       {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -117,13 +119,15 @@ export class EmbeddingService {
     const apiKey = decrypt(config.apiKeyEncrypted);
     const apiUrl = config.apiUrl.replace(/\/+$/, '');
 
+    const body: any = {
+      model: config.model,
+      input: texts,
+    };
+    if (config.dimensions) body.dimensions = config.dimensions;
+
     const response = await axios.post(
       `${apiUrl}/embeddings`,
-      {
-        model: config.model,
-        input: texts,
-        dimensions: config.dimensions,
-      },
+      body,
       {
         headers: {
           'Authorization': `Bearer ${apiKey}`,

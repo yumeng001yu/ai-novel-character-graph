@@ -239,14 +239,17 @@ export class CharacterRepo {
   async vectorSearch(novelId: string, queryEmbedding: number[], topK: number = 10): Promise<Array<{ id: string; name: string; score: number }>> {
     const session = getSession();
     try {
+      // 先尝试使用 Neo4j Vector Index
+      // 注意：db.index.vector.queryNodes 是全局搜索，需要扩大召回量再按小说过滤
+      const recallK = topK * 5; // 扩大召回量，避免其他小说的角色挤占名额
       const result = await session.run(
-        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
-         WHERE c.embedding IS NOT NULL
-         CALL db.index.vector.queryNodes('character_embedding', $topK, $queryEmbedding)
+        `CALL db.index.vector.queryNodes('character_embedding', $recallK, $queryEmbedding)
          YIELD node, score
-         WHERE node.id = c.id
-         RETURN c.id AS id, c.name AS name, score`,
-        { novelId, topK, queryEmbedding }
+         MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
+         WHERE c.id = node.id
+         RETURN c.id AS id, c.name AS name, score
+         LIMIT $topK`,
+        { novelId, recallK, topK, queryEmbedding }
       );
       return result.records.map(r => ({
         id: r.get('id'),

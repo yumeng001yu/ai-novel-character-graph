@@ -153,15 +153,10 @@ export class VectorSearchService {
       // 如果配置了 Reranker，对候选关系进行精排
       if (results.length > 0 && await rerankerService.isConfigured()) {
         try {
-          const queries = results.map(r => {
-            const source = allCharacters.find(c => c.id === r.sourceId);
-            const target = allCharacters.find(c => c.id === r.targetId);
-            return `${source?.name || ''}与${target?.name || ''}的关系`;
-          });
           const documents = results.map(r => {
             const source = allCharacters.find(c => c.id === r.sourceId);
             const target = allCharacters.find(c => c.id === r.targetId);
-            return `${source?.identity || ''} ${target?.identity || ''}`;
+            return `${source?.name || ''}（${source?.identity || ''}）与${target?.name || ''}（${target?.identity || ''}）的关系`;
           });
           const reranked = await rerankerService.rerank(
             '小说中人物之间的关系',
