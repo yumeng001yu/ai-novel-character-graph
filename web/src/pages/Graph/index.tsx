@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Select, Slider, Button, Space, Spin, message, Modal, Empty, Input } from 'antd';
+import { Card, Select, Slider, Button, Space, Spin, message, Modal, Empty, Input, Descriptions, Tag, Timeline, Divider } from 'antd';
 import { RollbackOutlined, ExportOutlined, SearchOutlined } from '@ant-design/icons';
-import { getGraph, getSnapshots, getNovels, rollback, exportGraph } from '../../services/api';
+import { getGraph, getSnapshots, getNovels, rollback, exportGraph, getCharacter, getCharacterTimeline } from '../../services/api';
 import G6 from '@antv/g6';
 
 const Graph: React.FC = () => {
@@ -11,6 +11,10 @@ const Graph: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [centerName, setCenterName] = useState<string>('');
+  const [selectedChar, setSelectedChar] = useState<any>(null);
+  const [charDetail, setCharDetail] = useState<any>(null);
+  const [charTimeline, setCharTimeline] = useState<any[]>([]);
+  const [charLoading, setCharLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
 
@@ -74,6 +78,24 @@ const Graph: React.FC = () => {
     loadGraph(selectedNovel, currentStep || undefined, centerName.trim());
   };
 
+  const handleNodeClick = async (nodeId: string) => {
+    setCharLoading(true);
+    setSelectedChar(nodeId);
+    try {
+      const [detailRes, timelineRes] = await Promise.all([
+        getCharacter(nodeId),
+        getCharacterTimeline(nodeId),
+      ]);
+      setCharDetail(detailRes.data);
+      setCharTimeline(timelineRes.data?.experienceTimeline || []);
+    } catch {
+      // 如果详情接口失败，只显示节点ID
+      setCharDetail({ character: { id: nodeId, name: nodeId } });
+      setCharTimeline([]);
+    }
+    setCharLoading(false);
+  };
+
   const renderGraph = (data: any) => {
     if (!containerRef.current) return;
 
@@ -82,7 +104,7 @@ const Graph: React.FC = () => {
     }
 
     const width = containerRef.current.offsetWidth;
-    const height = containerRef.current.offsetHeight || 500;
+    const height = containerRef.current.offsetHeight || 600;
 
     const graph = new G6.Graph({
       container: containerRef.current,
@@ -91,30 +113,52 @@ const Graph: React.FC = () => {
       layout: {
         type: 'force',
         preventOverlap: true,
-        nodeSize: 50,
+        nodeSize: 80,
+        nodeSpacing: 40,
+        linkDistance: 180,
+        nodeStrength: -1200,
+        edgeStrength: 0.3,
+        collideStrength: 0.8,
+        alpha: 0.3,
+        alphaDecay: 0.02,
+        forceSimulation: undefined,
       },
       defaultNode: {
         size: 40,
         style: { fill: '#1890ff', stroke: '#096dd9' },
-        labelCfg: { position: 'bottom', style: { fontSize: 12 } },
+        labelCfg: {
+          position: 'bottom',
+          style: { fontSize: 12, fill: '#333' },
+          offset: 6,
+        },
       },
       defaultEdge: {
         style: { stroke: '#a3b1bf', lineWidth: 1 },
-        labelCfg: { style: { fontSize: 10, fill: '#666' }, autoRotate: true },
+        labelCfg: {
+          style: { fontSize: 10, fill: '#666', background: { fill: '#fff', padding: [2, 4, 2, 4], radius: 2 } },
+          autoRotate: true,
+        },
       },
       nodeStateStyles: {
-        hover: { shadowColor: '#1890ff', shadowBlur: 10 },
+        hover: { shadowColor: '#1890ff', shadowBlur: 12 },
+        selected: { shadowColor: '#fa8c16', shadowBlur: 15 },
       },
       modes: {
         default: ['drag-canvas', 'zoom-canvas', 'drag-node'],
       },
     });
 
+    // 节点点击
+    graph.on('node:click', (evt: any) => {
+      const nodeId = evt.item.getID();
+      handleNodeClick(nodeId);
+    });
+
     const nodes = (data.nodes || []).map((n: any) => ({
       id: n.id,
       label: n.name || n.id,
       type: 'circle',
-      size: n.isProtagonist ? 60 : (data.centerId === n.id ? 55 : 40),
+      size: n.isProtagonist ? 65 : (data.centerId === n.id ? 55 : 45),
       style: {
         fill: data.centerId === n.id ? '#fa8c16' : (n.isProtagonist ? '#f5222d' : '#1890ff'),
       },
@@ -129,6 +173,10 @@ const Graph: React.FC = () => {
 
     graph.data({ nodes, edges });
     graph.render();
+
+    // 让力导向布局多跑几轮再稳定
+    graph.fitView([40, 40]);
+
     graphRef.current = graph;
   };
 
@@ -164,6 +212,9 @@ const Graph: React.FC = () => {
       message.error('导出失败');
     }
   };
+
+  const char = charDetail?.character;
+  const relations = charDetail?.relations || [];
 
   return (
     <div>
@@ -201,6 +252,71 @@ const Graph: React.FC = () => {
           )}
         </Spin>
       </Card>
+
+      {/* 角色详情弹窗 */}
+      <Modal
+        title={char ? `角色详情：${char.name}` : '角色详情'}
+        open={!!selectedChar}
+        onCancel={() => { setSelectedChar(null); setCharDetail(null); setCharTimeline([]); }}
+        footer={null}
+        width={560}
+      >
+        <Spin spinning={charLoading}>
+          {char && (
+            <div>
+              <Descriptions column={2} size="small" bordered style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="名字">{char.name}</Descriptions.Item>
+                <Descriptions.Item label="性别">{char.gender || '未知'}</Descriptions.Item>
+                <Descriptions.Item label="阵营">{char.faction || '未知'}</Descriptions.Item>
+                <Descriptions.Item label="身份">{char.identity || '未知'}</Descriptions.Item>
+                <Descriptions.Item label="主角" span={2}>
+                  {char.isProtagonist ? <Tag color="red">主角</Tag> : '否'}
+                  {char.protagonistOrder != null && char.protagonistOrder > 0 && ` · 第${char.protagonistOrder}主角`}
+                </Descriptions.Item>
+                {char.aliases?.length > 0 && (
+                  <Descriptions.Item label="别名" span={2}>
+                    {char.aliases.map((a: string) => <Tag key={a} style={{ marginBottom: 2 }}>{a}</Tag>)}
+                  </Descriptions.Item>
+                )}
+                {char.description && (
+                  <Descriptions.Item label="描述" span={2}>{char.description}</Descriptions.Item>
+                )}
+                {char.firstAppearChapter && (
+                  <Descriptions.Item label="首次出场">{char.firstAppearChapter}</Descriptions.Item>
+                )}
+              </Descriptions>
+
+              {charTimeline.length > 0 && (
+                <>
+                  <Divider orientation="left">人物经历</Divider>
+                  <Timeline style={{ marginBottom: 16 }}>
+                    {charTimeline.map((t: any, i: number) => (
+                      <Timeline.Item key={i} color={i === 0 ? 'red' : 'blue'}>
+                        <b>{t.chapter || `第${i + 1}步`}</b>：{t.event}
+                      </Timeline.Item>
+                    ))}
+                  </Timeline>
+                </>
+              )}
+
+              {relations.length > 0 && (
+                <>
+                  <Divider orientation="left">人物关系（{relations.length}条）</Divider>
+                  <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                    {relations.map((r: any, i: number) => (
+                      <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                        <Tag color="blue">{r.targetName || r.targetId}</Tag>
+                        <span style={{ color: '#666', fontSize: 12 }}>{r.relationType}</span>
+                        {r.context && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.context}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </Spin>
+      </Modal>
     </div>
   );
 };
