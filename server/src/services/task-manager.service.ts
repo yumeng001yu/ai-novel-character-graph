@@ -15,6 +15,8 @@ import { snapshotService } from './snapshot.service';
 import { searchIndexerService } from './search-indexer.service';
 import { rollbackService } from './rollback.service';
 import { settingsService } from './settings.service';
+import { embeddingService } from './embedding.service';
+import { vectorSearchService } from './vector-search.service';
 import { AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { estimateTokens, getEncodingForModel } from '../utils/token-counter';
@@ -152,6 +154,9 @@ export class TaskManagerService {
     await taskQueueRepo.updateProgress(novelId, 0);
     await taskQueueRepo.updateTotalSteps(novelId, totalSteps);
 
+    // 初始化向量索引（如果配置了 Embedding）
+    await vectorSearchService.ensureVectorIndex();
+
     // 确定从哪一步开始（断点续建）
     let startStep = 0;
     let skipPostProcessing = false;
@@ -217,6 +222,22 @@ export class TaskManagerService {
         await characterDisambiguatorService.detectDisambiguations(novelId, onStream);
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'disambiguating');
 
+        // 向量消歧增强（可选）
+        if (await embeddingService.isConfigured()) {
+          await progressRepo.setProgress(novelId, {
+            stepNumber: i + 1,
+            phase: 'vector_disambiguating',
+            message: '正在通过向量相似度增强角色消歧...',
+          });
+          const allChars = await characterRepo.findByNovelId(novelId);
+          for (const char of allChars) {
+            const similar = await vectorSearchService.findSimilarCharacters(novelId, char, 0.85);
+            if (similar.length > 0) {
+              logger.info(`向量消歧发现：${char.name} 与 ${similar.map(s => s.name).join(', ')} 相似度较高`);
+            }
+          }
+        }
+
         // 增量合并
         await progressRepo.setProgress(novelId, {
           stepNumber: i + 1,
@@ -234,6 +255,21 @@ export class TaskManagerService {
         });
         await conflictDetectorService.detectAttributeConflicts(novelId);
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'conflict_detecting');
+
+        // 隐含关系发现（可选）
+        if (await embeddingService.isConfigured()) {
+          await progressRepo.setProgress(novelId, {
+            stepNumber: i + 1,
+            phase: 'implicit_relations',
+            message: '正在通过向量相似度发现隐含关系...',
+          });
+          const allChars = await characterRepo.findByNovelId(novelId);
+          const newCharIds = mergeResult.newCharacters.map(c => c.id);
+          const implicitRelations = await vectorSearchService.discoverImplicitRelations(novelId, newCharIds, allChars);
+          if (implicitRelations.length > 0) {
+            logger.info(`发现 ${implicitRelations.length} 条隐含关系候选`);
+          }
+        }
 
         // 更新角色档案
         await progressRepo.setProgress(novelId, {
@@ -256,6 +292,19 @@ export class TaskManagerService {
           message: '正在保存快照...',
         });
         await snapshotService.saveSnapshot(novelId, i + 1, stepChapters.map(c => c.index));
+
+        // 向量索引写入（可选）
+        if (await embeddingService.isConfigured()) {
+          await progressRepo.setProgress(novelId, {
+            stepNumber: i + 1,
+            phase: 'vector_indexing',
+            message: '正在更新向量索引...',
+          });
+          await vectorSearchService.indexCharacters(mergeResult.newCharacters);
+          for (const char of mergeResult.updatedCharacters) {
+            await vectorSearchService.indexCharacter(char.id, char);
+          }
+        }
 
         // 更新步数
         await novelRepo.updateStep(novelId, i + 1, totalSteps);

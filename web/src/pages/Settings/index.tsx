@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Select, InputNumber, Switch, message, Space, Alert, Tag } from 'antd';
-import { getAiConfig, saveAiConfig, testAiConnection, getModels, getBuildConfig, saveBuildConfig } from '../../services/api';
+import { getAiConfig, saveAiConfig, testAiConnection, getModels, getBuildConfig, saveBuildConfig, getEmbeddingConfig, saveEmbeddingConfig, testEmbeddingConnection, getEmbeddingModels, getRerankerConfig, saveRerankerConfig, testRerankerConnection } from '../../services/api';
 
 const Settings: React.FC = () => {
   const [aiForm] = Form.useForm();
@@ -9,10 +9,20 @@ const Settings: React.FC = () => {
   const [loadingModels, setLoadingModels] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [configured, setConfigured] = useState(false);
+  const [embForm] = Form.useForm();
+  const [rerankerForm] = Form.useForm();
+  const [embModels, setEmbModels] = useState<any[]>([]);
+  const [loadingEmbModels, setLoadingEmbModels] = useState(false);
+  const [embTestResult, setEmbTestResult] = useState<any>(null);
+  const [embConfigured, setEmbConfigured] = useState(false);
+  const [rerankerTestResult, setRerankerTestResult] = useState<any>(null);
+  const [rerankerConfigured, setRerankerConfigured] = useState(false);
 
   useEffect(() => {
     loadAiConfig();
     loadBuildConfig();
+    loadEmbeddingConfig();
+    loadRerankerConfig();
   }, []);
 
   const loadAiConfig = async () => {
@@ -43,6 +53,41 @@ const Settings: React.FC = () => {
       buildForm.setFieldsValue(res.data);
     } catch (err) {
       message.error('加载构建配置失败');
+    }
+  };
+
+  const loadEmbeddingConfig = async () => {
+    try {
+      const res = await getEmbeddingConfig();
+      if (res.data.configured === false) {
+        setEmbConfigured(false);
+        return;
+      }
+      setEmbConfigured(true);
+      embForm.setFieldsValue({
+        apiUrl: res.data.apiUrl,
+        model: res.data.model,
+        dimensions: res.data.dimensions,
+      });
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const loadRerankerConfig = async () => {
+    try {
+      const res = await getRerankerConfig();
+      if (res.data.configured === false) {
+        setRerankerConfigured(false);
+        return;
+      }
+      setRerankerConfigured(true);
+      rerankerForm.setFieldsValue({
+        apiUrl: res.data.apiUrl,
+        model: res.data.model,
+      });
+    } catch (err) {
+      // ignore
     }
   };
 
@@ -97,6 +142,76 @@ const Settings: React.FC = () => {
       message.success('构建配置已保存');
     } catch (err: any) {
       message.error('保存构建配置失败');
+    }
+  };
+
+  const handleGetEmbModels = async () => {
+    try {
+      const values = await embForm.validateFields(['apiUrl', 'apiKey']);
+      setLoadingEmbModels(true);
+      try {
+        const res = await getEmbeddingModels(values.apiUrl, values.apiKey);
+        setEmbModels(res.data.models || []);
+        message.success(`发现 ${(res.data.models || []).length} 个 Embedding 模型`);
+      } catch (err: any) {
+        message.error('获取模型列表失败: ' + (err.response?.data?.error || err.message));
+      }
+      setLoadingEmbModels(false);
+    } catch (err) {
+      // form validation failed
+    }
+  };
+
+  const handleTestEmbedding = async () => {
+    try {
+      const values = await embForm.validateFields(['apiUrl', 'apiKey', 'model']);
+      try {
+        const res = await testEmbeddingConnection(values.apiUrl, values.apiKey, values.model);
+        setEmbTestResult(res.data);
+        if (res.data.dimensions) {
+          embForm.setFieldsValue({ dimensions: res.data.dimensions });
+        }
+      } catch (err: any) {
+        setEmbTestResult({ success: false, message: '连接失败: ' + (err.response?.data?.error || err.message) });
+      }
+    } catch (err) {
+      // form validation failed
+    }
+  };
+
+  const handleSaveEmbedding = async () => {
+    try {
+      const values = await embForm.validateFields();
+      await saveEmbeddingConfig(values);
+      message.success('Embedding 配置已保存');
+      setEmbConfigured(true);
+    } catch (err: any) {
+      if (err.response?.data?.error) message.error(err.response.data.error);
+    }
+  };
+
+  const handleTestReranker = async () => {
+    try {
+      const values = await rerankerForm.validateFields(['apiUrl', 'apiKey', 'model']);
+      try {
+        const res = await testRerankerConnection(values.apiUrl, values.apiKey, values.model);
+        setRerankerTestResult(res.data);
+      } catch (err: any) {
+        setRerankerTestResult({ success: false, message: '连接失败: ' + (err.response?.data?.error || err.message) });
+      }
+    } catch (err) {
+      // form validation failed
+    }
+  };
+
+  const handleSaveReranker = async () => {
+    try {
+      const values = await rerankerForm.validateFields();
+      await saveRerankerConfig(values);
+      message.success('Reranker 配置已保存');
+      setRerankerConfigured(true);
+    } catch (err: any) {
+      if (err.response?.data?.error) message.error(err.response.data.error);
     }
   };
 
@@ -158,6 +273,64 @@ const Settings: React.FC = () => {
           </Form.Item>
           <Form.Item>
             <Button type="primary" onClick={handleSaveBuild}>保存构建配置</Button>
+          </Form.Item>
+        </Form>
+      </Card>
+
+      <Card title="Embedding 模型配置（可选）" style={{ marginBottom: 24 }}
+        extra={embConfigured ? <Tag color="green">已配置</Tag> : <Tag color="default">未配置</Tag>}>
+        <Alert type="info" message="配置 Embedding 模型后，系统将支持向量语义搜索、角色消歧增强和隐含关系发现。未配置时不影响基本功能。" style={{ marginBottom: 16 }} />
+        <Form form={embForm} layout="vertical">
+          <Form.Item label="API 地址" name="apiUrl" rules={[{ required: true, message: '请输入API地址' }]}>
+            <Input placeholder="如 https://api.openai.com/v1" />
+          </Form.Item>
+          <Form.Item label="API Key" name="apiKey" rules={[{ required: !embConfigured, message: '请输入API Key' }]}>
+            <Input.Password placeholder={embConfigured ? '留空则保持原有Key' : 'sk-...'} />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button onClick={handleGetEmbModels} loading={loadingEmbModels}>获取模型列表</Button>
+              <Button onClick={handleTestEmbedding}>测试连接</Button>
+            </Space>
+            {embTestResult && (
+              <Alert type={embTestResult.success ? 'success' : 'error'} message={embTestResult.message} style={{ marginTop: 8 }} />
+            )}
+          </Form.Item>
+          <Form.Item label="选择模型" name="model" rules={[{ required: true }]}>
+            <Select placeholder="先获取模型列表或手动输入" showSearch options={embModels.map(m => ({
+              label: m.name, value: m.id,
+            }))} />
+          </Form.Item>
+          <Form.Item label="向量维度" name="dimensions" tooltip="测试连接时自动检测">
+            <InputNumber min={128} max={8192} placeholder="1536" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" onClick={handleSaveEmbedding}>保存 Embedding 配置</Button>
+          </Form.Item>
+        </Form>
+      </Card>
+
+      <Card title="Reranker 模型配置（可选）" style={{ marginBottom: 24 }}
+        extra={rerankerConfigured ? <Tag color="green">已配置</Tag> : <Tag color="default">未配置</Tag>}>
+        <Alert type="info" message="配置 Reranker 模型后，系统将在语义搜索和隐含关系发现中对候选结果进行精排，提高准确率。需要先配置 Embedding。" style={{ marginBottom: 16 }} />
+        <Form form={rerankerForm} layout="vertical">
+          <Form.Item label="API 地址" name="apiUrl" rules={[{ required: true, message: '请输入API地址' }]}>
+            <Input placeholder="如 https://api.cohere.ai/v1" />
+          </Form.Item>
+          <Form.Item label="API Key" name="apiKey" rules={[{ required: !rerankerConfigured, message: '请输入API Key' }]}>
+            <Input.Password placeholder={rerankerConfigured ? '留空则保持原有Key' : 'sk-...'} />
+          </Form.Item>
+          <Form.Item>
+            <Button onClick={handleTestReranker}>测试连接</Button>
+            {rerankerTestResult && (
+              <Alert type={rerankerTestResult.success ? 'success' : 'error'} message={rerankerTestResult.message} style={{ marginTop: 8 }} />
+            )}
+          </Form.Item>
+          <Form.Item label="模型名" name="model" rules={[{ required: true }]}>
+            <Input placeholder="如 rerank-v3.5 或 bge-reranker-large" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" onClick={handleSaveReranker}>保存 Reranker 配置</Button>
           </Form.Item>
         </Form>
       </Card>

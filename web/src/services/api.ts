@@ -64,6 +64,20 @@ export const getModels = (apiUrl: string, apiKey: string) =>
 export const getBuildConfig = () => api.get('/settings/build');
 export const saveBuildConfig = (data: any) => api.put('/settings/build', data);
 
+// Embedding 配置
+export const getEmbeddingConfig = () => api.get('/settings/embedding');
+export const saveEmbeddingConfig = (data: any) => api.put('/settings/embedding', data);
+export const testEmbeddingConnection = (apiUrl: string, apiKey: string, model: string) =>
+  api.post('/settings/embedding/test', { apiUrl, apiKey, model });
+export const getEmbeddingModels = (apiUrl: string, apiKey: string) =>
+  api.post('/settings/embedding/models', { apiUrl, apiKey });
+
+// Reranker 配置
+export const getRerankerConfig = () => api.get('/settings/reranker');
+export const saveRerankerConfig = (data: any) => api.put('/settings/reranker', data);
+export const testRerankerConnection = (apiUrl: string, apiKey: string, model: string) =>
+  api.post('/settings/reranker/test', { apiUrl, apiKey, model });
+
 // 导出
 export const exportGraph = (novelId: string, format: string) =>
   api.get(`/novels/${novelId}/export`, { params: { format }, responseType: 'blob' });

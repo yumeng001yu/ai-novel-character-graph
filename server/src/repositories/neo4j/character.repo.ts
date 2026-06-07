@@ -1,6 +1,21 @@
 import { getSession } from './connection';
 import { Character, CharacterProfile, DisambiguationStatus } from '../../types';
 import { v4 as uuid } from 'uuid';
+import { getLogger } from '../../utils/logger';
+
+const logger = getLogger();
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 export class CharacterRepo {
   async create(data: Omit<Character, 'id'>): Promise<Character> {
@@ -197,6 +212,90 @@ export class CharacterRepo {
         { novelId }
       );
       return result.records.map(r => r.get('c').properties as Character);
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * 为角色设置 embedding 向量
+   */
+  async setEmbedding(id: string, embedding: number[]): Promise<void> {
+    const session = getSession();
+    try {
+      await session.run(
+        `MATCH (c:Character {id: $id}) SET c.embedding = $embedding`,
+        { id, embedding }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * 向量相似度搜索（使用 Neo4j Vector Index）
+   * 需要先创建向量索引
+   */
+  async vectorSearch(novelId: string, queryEmbedding: number[], topK: number = 10): Promise<Array<{ id: string; name: string; score: number }>> {
+    const session = getSession();
+    try {
+      const result = await session.run(
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
+         WHERE c.embedding IS NOT NULL
+         CALL db.index.vector.queryNodes('character_embedding', $topK, $queryEmbedding)
+         YIELD node, score
+         WHERE node.id = c.id
+         RETURN c.id AS id, c.name AS name, score`,
+        { novelId, topK, queryEmbedding }
+      );
+      return result.records.map(r => ({
+        id: r.get('id'),
+        name: r.get('name'),
+        score: r.get('score'),
+      }));
+    } catch (err) {
+      // 向量索引可能不存在，回退到余弦相似度计算
+      logger.warn(err, '向量索引查询失败，回退到手动计算');
+      return this.fallbackVectorSearch(novelId, queryEmbedding, topK);
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * 回退方案：手动计算余弦相似度
+   */
+  private async fallbackVectorSearch(novelId: string, queryEmbedding: number[], topK: number): Promise<Array<{ id: string; name: string; score: number }>> {
+    const characters = await this.findByNovelId(novelId);
+    const results: Array<{ id: string; name: string; score: number }> = [];
+
+    for (const char of characters as any[]) {
+      if (!char.embedding || !Array.isArray(char.embedding)) continue;
+      const score = cosineSimilarity(queryEmbedding, char.embedding);
+      results.push({ id: char.id, name: char.name, score });
+    }
+
+    return results.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /**
+   * 创建向量索引（如果不存在）
+   */
+  async ensureVectorIndex(dimensions: number): Promise<void> {
+    const session = getSession();
+    try {
+      // Neo4j 5.11+ 向量索引
+      await session.run(
+        `CREATE VECTOR INDEX character_embedding IF NOT EXISTS
+         FOR (c:Character) ON (c.embedding)
+         OPTIONS {indexConfig: {
+           \`vector.dimensions\`: $dimensions,
+           \`vector.similarity_function\`: 'cosine'
+         }}`,
+        { dimensions }
+      );
+    } catch (err) {
+      logger.warn(err, '创建向量索引失败（可能 Neo4j 版本不支持或索引已存在）');
     } finally {
       await session.close();
     }

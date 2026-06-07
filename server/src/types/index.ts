@@ -244,7 +244,7 @@ export interface AIStreamEvent {
 
 export interface StepProgress {
   stepNumber: number;
-  phase: 'extracting' | 'disambiguating' | 'merging' | 'conflict_detecting' | 'profile_updating' | 'snapshot_saving';
+  phase: 'extracting' | 'disambiguating' | 'vector_disambiguating' | 'merging' | 'implicit_relations' | 'conflict_detecting' | 'profile_updating' | 'vector_indexing' | 'snapshot_saving';
   message: string;
   tokenUsage?: {
     input: number;
@@ -365,6 +365,62 @@ export interface SaveBuildConfigRequest {
 export interface GraphQueryParams {
   center?: string;
   step?: number;
+}
+
+// ===== Embedding/Reranker 配置 =====
+export interface EmbeddingConfig {
+  apiUrl: string;
+  apiKeyEncrypted: string;
+  model: string;
+  dimensions: number;
+  updatedAt: string;
+}
+
+export interface EmbeddingConfigPublic {
+  apiUrl: string;
+  apiKeyMasked: string;
+  model: string;
+  dimensions: number;
+  updatedAt: string;
+}
+
+export interface RerankerConfig {
+  apiUrl: string;
+  apiKeyEncrypted: string;
+  model: string;
+  updatedAt: string;
+}
+
+export interface RerankerConfigPublic {
+  apiUrl: string;
+  apiKeyMasked: string;
+  model: string;
+  updatedAt: string;
+}
+
+export interface SaveEmbeddingConfigRequest {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions?: number;
+}
+
+export interface SaveRerankerConfigRequest {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+export interface VectorSearchResult {
+  id: string;
+  name: string;
+  score: number;
+  type: 'Character' | 'Event';
+}
+
+export interface RerankResult {
+  index: number;
+  relevanceScore: number;
 }
 
 // ===== 自定义错误 =====

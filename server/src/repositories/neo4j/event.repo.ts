@@ -63,6 +63,18 @@ export class EventRepo {
       await session.close();
     }
   }
+
+  async setEmbedding(id: string, embedding: number[]): Promise<void> {
+    const session = getSession();
+    try {
+      await session.run(
+        `MATCH (e:Event {id: $id}) SET e.embedding = $embedding`,
+        { id, embedding }
+      );
+    } finally {
+      await session.close();
+    }
+  }
 }
 
 export const eventRepo = new EventRepo();

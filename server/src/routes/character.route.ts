@@ -5,15 +5,36 @@ import { characterDisambiguatorService } from '../services/character-disambiguat
 import { conflictDetectorService } from '../services/conflict-detector.service';
 import { searchIndexerService } from '../services/search-indexer.service';
 import { profileBuilderService } from '../services/profile-builder.service';
+import { embeddingService } from '../services/embedding.service';
+import { vectorSearchService } from '../services/vector-search.service';
 import fs from 'fs';
 import path from 'path';
 import { getConfig } from '../config';
 
 export async function characterRoutes(app: FastifyInstance) {
-  // 角色搜索
+  // 角色搜索（支持语义搜索）
   app.get('/search', async (req: FastifyRequest, reply: FastifyReply) => {
     const { keyword, novelId } = req.query as any;
     if (!keyword || !novelId) return reply.status(400).send({ error: '缺少参数' });
+
+    // 先尝试语义搜索
+    if (await embeddingService.isConfigured()) {
+      const semanticResults = await vectorSearchService.semanticSearch(novelId, keyword);
+      if (semanticResults.length > 0) {
+        // 补充完整角色信息
+        const characters = [];
+        for (const r of semanticResults) {
+          const char = await characterRepo.findById(r.id);
+          if (char) characters.push({ ...char, searchScore: r.score });
+        }
+        if (characters.length > 0) {
+          reply.send(characters);
+          return;
+        }
+      }
+    }
+
+    // 回退到关键词搜索
     const characters = await searchIndexerService.search(novelId, keyword);
     reply.send(characters);
   });

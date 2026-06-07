@@ -39,9 +39,12 @@ interface AILogItem {
 const phaseLabels: Record<string, string> = {
   extracting: '提取人物关系',
   disambiguating: '角色消歧',
+  vector_disambiguating: '向量消歧增强',
   merging: '合并图谱数据',
+  implicit_relations: '隐含关系发现',
   conflict_detecting: '冲突检测',
   profile_updating: '更新角色档案',
+  vector_indexing: '向量索引更新',
   snapshot_saving: '保存快照',
   protagonist_detecting: '主角识别',
   indexing: '搜索索引',
