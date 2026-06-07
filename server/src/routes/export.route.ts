@@ -7,7 +7,10 @@ export async function exportRoutes(app: FastifyInstance) {
     const { format } = req.query as any;
 
     const validFormats: ExportFormat[] = ['json', 'graphml', 'gexf', 'csv'];
-    const exportFormat: ExportFormat = validFormats.includes(format) ? format : 'json';
+    if (!format || !validFormats.includes(format)) {
+      return reply.status(400).send({ error: `不支持的导出格式：${format}，支持：${validFormats.join('/')}` });
+    }
+    const exportFormat: ExportFormat = format;
 
     try {
       const data = await exporterService.export(id, exportFormat);

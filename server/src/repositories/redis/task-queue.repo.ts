@@ -1,7 +1,15 @@
 import { getRedis } from './connection';
 import { BuildTask, TaskStatus } from '../../types';
+import { getLogger } from '../../utils/logger';
 
+const logger = getLogger();
 const KEY_PREFIX = 'task:';
+
+function checkLuaResult(result: any, operation: string): void {
+  if (result === 0) {
+    logger.warn(`Lua 脚本 ${operation} 未找到任务记录`);
+  }
+}
 
 export class TaskQueueRepo {
   async setTask(novelId: string, task: BuildTask): Promise<void> {
@@ -26,7 +34,7 @@ export class TaskQueueRepo {
       redis.call('SET', KEYS[1], cjson.encode(task))
       return 1
     `;
-    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, status);
+    checkLuaResult(await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, status), 'updateStatus');
   }
 
   async updateProgress(novelId: string, currentStep: number): Promise<void> {
@@ -40,7 +48,7 @@ export class TaskQueueRepo {
       redis.call('SET', KEYS[1], cjson.encode(task))
       return 1
     `;
-    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, currentStep);
+    checkLuaResult(await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, currentStep), 'updateProgress');
   }
 
   async updateTotalSteps(novelId: string, totalSteps: number): Promise<void> {
@@ -53,7 +61,7 @@ export class TaskQueueRepo {
       redis.call('SET', KEYS[1], cjson.encode(task))
       return 1
     `;
-    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, totalSteps);
+    checkLuaResult(await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, totalSteps), 'updateTotalSteps');
   }
 
   async updateLastCompletedStep(novelId: string, step: number, phase: string): Promise<void> {
@@ -67,7 +75,7 @@ export class TaskQueueRepo {
       redis.call('SET', KEYS[1], cjson.encode(task))
       return 1
     `;
-    await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, step, phase);
+    checkLuaResult(await redis.eval(script, 1, `${KEY_PREFIX}${novelId}`, step, phase), 'updateLastCompletedStep');
   }
 
   async deleteTask(novelId: string): Promise<void> {

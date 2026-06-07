@@ -61,10 +61,22 @@ export class CharacterRepo {
   async update(id: string, data: Partial<Character>): Promise<void> {
     const session = getSession();
     try {
-      const setClauses = Object.keys(data).map(k => `c.${k} = $${k}`).join(', ');
+      // 白名单校验：只允许更新已知字段
+      const allowedFields = new Set([
+        'name', 'aliases', 'gender', 'faction', 'identity', 'description',
+        'firstAppearChapter', 'isProtagonist', 'protagonistOrder',
+        'disambiguationStatus', 'novelId',
+      ]);
+      const safeData: Record<string, any> = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (allowedFields.has(k)) safeData[k] = v;
+      }
+      if (Object.keys(safeData).length === 0) return;
+
+      const setClauses = Object.keys(safeData).map(k => `c.${k} = $${k}`).join(', ');
       await session.run(
         `MATCH (c:Character {id: $id}) SET ${setClauses}`,
-        { id, ...data }
+        { id, ...safeData }
       );
     } finally {
       await session.close();

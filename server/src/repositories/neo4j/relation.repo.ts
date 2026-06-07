@@ -81,10 +81,10 @@ export class RelationRepo {
     const session = getSession();
     try {
       await session.run(
-        `MATCH (c1:Character {novelId: $novelId})-[r:RELATES_TO]->(c2:Character)
-         WHERE r.createdStep = $step
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c1:Character)-[r:RELATES_TO]->(c2:Character)
+         WHERE r.createdStep = $stepNumber
          DELETE r`,
-        { novelId, step: stepNumber }
+        { novelId, stepNumber }
       );
     } finally {
       await session.close();

@@ -4,6 +4,9 @@ import { rollbackService } from '../services/rollback.service';
 import { costEstimatorService } from '../services/cost-estimator.service';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
 import { getRedis } from '../repositories/redis/connection';
+import { getLogger } from '../utils/logger';
+
+const logger = getLogger();
 
 export async function taskRoutes(app: FastifyInstance) {
   // 启动构建
@@ -13,6 +16,7 @@ export async function taskRoutes(app: FastifyInstance) {
       await taskManagerService.startBuild(id);
       reply.send({ success: true, message: '构建任务已启动' });
     } catch (err: any) {
+      logger.error(err, '启动构建失败');
       reply.status(400).send({ error: err.message });
     }
   });
@@ -24,6 +28,7 @@ export async function taskRoutes(app: FastifyInstance) {
       await taskManagerService.cancelBuild(id);
       reply.send({ success: true, message: '取消请求已发送' });
     } catch (err: any) {
+      logger.error(err, '取消构建失败');
       reply.status(400).send({ error: err.message });
     }
   });

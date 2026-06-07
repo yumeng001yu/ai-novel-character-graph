@@ -34,8 +34,8 @@ export async function characterRoutes(app: FastifyInstance) {
     const character = await characterRepo.findById(id);
     if (!character) return reply.status(404).send({ error: '角色未找到' });
 
-    // 加载档案（路径安全校验）
-    if (character.novelId.includes('/') || character.novelId.includes('\\') || character.novelId.includes('..')) {
+    // 安全校验：验证 novelId 格式（uuid）
+    if (!/^[a-f0-9-]+$/.test(character.novelId)) {
       return reply.status(400).send({ error: '无效的小说ID' });
     }
     const profileDir = path.resolve(getConfig().build.snapshot_dir, '..', 'profiles', character.novelId);

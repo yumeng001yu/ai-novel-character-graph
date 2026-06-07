@@ -39,8 +39,8 @@ export async function novelRoutes(app: FastifyInstance) {
     });
 
     // 保存原文到文件（供后续构建时读取）
-    // 安全校验：novel.id 由 uuid 生成，但仍然检查
-    if (novel.id.includes('/') || novel.id.includes('\\') || novel.id.includes('..')) {
+    // 安全校验：novel.id 由 uuid 生成，但仍然验证
+    if (!/^[a-f0-9-]+$/.test(novel.id)) {
       return reply.status(400).send({ error: '无效的小说ID' });
     }
     const novelDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', novel.id);
@@ -94,8 +94,8 @@ export async function novelRoutes(app: FastifyInstance) {
       contextSize,
     });
 
-    // 保存原文
-    if (novel.id.includes('/') || novel.id.includes('\\') || novel.id.includes('..')) {
+    // 安全校验：novel.id 由 uuid 生成，但仍然验证
+    if (!/^[a-f0-9-]+$/.test(novel.id)) {
       return reply.status(400).send({ error: '无效的小说ID' });
     }
     const novelDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', novel.id);

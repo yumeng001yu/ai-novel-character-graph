@@ -47,8 +47,10 @@ export class MergerService {
           const mergedAliases = [...new Set([...existing.aliases, ...charData.aliases])];
           updates.aliases = mergedAliases;
         }
+        // 只在原角色属性为空时填充新信息
         if (charData.faction && !existing.faction) updates.faction = charData.faction;
         if (charData.identity && !existing.identity) updates.identity = charData.identity;
+        if (charData.gender && !existing.gender) updates.gender = charData.gender;
 
         await characterRepo.update(existing.id, updates);
         updatedCharacters.push(existing);

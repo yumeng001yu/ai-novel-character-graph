@@ -16,6 +16,16 @@ const Graph: React.FC = () => {
 
   useEffect(() => { loadNovels(); }, []);
 
+  // 组件卸载时销毁 G6 实例
+  useEffect(() => {
+    return () => {
+      if (graphRef.current) {
+        graphRef.current.destroy();
+        graphRef.current = null;
+      }
+    };
+  }, []);
+
   const loadNovels = async () => {
     try {
       const res = await getNovels();
