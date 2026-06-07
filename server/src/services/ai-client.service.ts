@@ -220,15 +220,31 @@ export async function callAIStream(
       }
       messages.push({ role: 'user', content: prompt });
 
-      // 流式调用
-      const stream = await client.chat.completions.create({
-        model: config.model,
-        messages,
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
-        stream: true,
-        stream_options: { include_usage: true },
-      });
+      // 流式调用（stream_options 仅部分 API 支持，失败时回退到不带该参数）
+      let stream;
+      try {
+        stream = await client.chat.completions.create({
+          model: config.model,
+          messages,
+          temperature: config.temperature,
+          max_tokens: config.maxTokens,
+          stream: true,
+          stream_options: { include_usage: true },
+        });
+      } catch (streamErr: any) {
+        // 不支持 stream_options 的 API，回退到普通流式调用
+        if (streamErr.status === 400 || streamErr.status === 422 || streamErr.code === 'invalid_request_error') {
+          stream = await client.chat.completions.create({
+            model: config.model,
+            messages,
+            temperature: config.temperature,
+            max_tokens: config.maxTokens,
+            stream: true,
+          });
+        } else {
+          throw streamErr;
+        }
+      }
 
       let fullContent = '';
 
@@ -251,6 +267,11 @@ export async function callAIStream(
         const finishReason = chunk.choices[0]?.finish_reason;
         if (finishReason === 'content_filter') {
           throw new AIContentRefusedError('AI 模型内容审核过滤，该段文本可能包含被屏蔽的内容');
+        }
+        // 检测 refusal 字段（OpenAI 格式）
+        const refusalField = (chunk.choices[0]?.delta as any)?.refusal;
+        if (refusalField) {
+          throw new AIContentRefusedError(`AI 模型拒绝处理：${refusalField}`);
         }
       }
 

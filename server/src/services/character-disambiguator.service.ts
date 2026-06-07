@@ -1,4 +1,4 @@
-import { Character } from '../types';
+import { Character, AIContentRefusedError } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
 import { getSession } from '../repositories/neo4j/connection';
 import { callAIStream, AIStreamCallback } from './ai-client.service';
@@ -81,6 +81,8 @@ ${charList}
           }
         }
       } catch (err) {
+        // AI 内容审核拒绝需要冒泡
+        if (err instanceof AIContentRefusedError) throw err;
         logger.warn(err, 'AI 同人异名检测失败');
       }
     }

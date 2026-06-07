@@ -103,14 +103,16 @@ const Task: React.FC = () => {
     }
   }, [aiLogs, autoScroll]);
 
-  // 新日志条目自动展开
+  // 新日志条目自动展开（仅在新增日志时触发，不在 delta 更新时触发）
+  const prevLogCountRef = useRef(0);
   useEffect(() => {
-    if (aiLogs.length > 0) {
+    if (aiLogs.length > prevLogCountRef.current) {
       const lastLog = aiLogs[aiLogs.length - 1];
       if (!expandedKeys.includes(lastLog.logId)) {
         setExpandedKeys(prev => [...prev, lastLog.logId]);
       }
     }
+    prevLogCountRef.current = aiLogs.length;
   }, [aiLogs.length]);
 
   const loadNovels = async () => {
@@ -245,8 +247,16 @@ const Task: React.FC = () => {
   }, []);
 
   // 选择小说时检查任务状态
+  const prevNovelIdRef = useRef<string>('');
   useEffect(() => {
     if (!novelId) return;
+
+    // 切换小说时清空日志，同一小说重连时保留
+    if (novelId !== prevNovelIdRef.current) {
+      setAiLogs([]);
+      setProgress(null);
+      prevNovelIdRef.current = novelId;
+    }
 
     const checkAndConnect = async () => {
       try {
@@ -268,8 +278,6 @@ const Task: React.FC = () => {
       }
     };
 
-    setAiLogs([]);
-    setProgress(null);
     checkAndConnect();
 
     return () => { disconnectSSE(); };

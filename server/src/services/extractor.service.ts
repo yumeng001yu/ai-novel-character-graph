@@ -1,5 +1,5 @@
 import { callAIStream, AIStreamCallback } from './ai-client.service';
-import { Character, Relation, Event, Inference } from '../types';
+import { Character, Relation, Event, Inference, AIContentRefusedError } from '../types';
 import { getLogger } from '../utils/logger';
 import { v4 as uuid } from 'uuid';
 import { settingsService } from './settings.service';
@@ -105,6 +105,8 @@ ${text}`;
         inferences: Array.isArray(parsed.inferences) ? parsed.inferences : [],
       } as ExtractionResult;
     } catch (err) {
+      // AI 内容审核拒绝需要冒泡，不能被吞掉
+      if (err instanceof AIContentRefusedError) throw err;
       logger.error({ err, response }, 'AI 提取结果解析失败');
       return { characters: [], relations: [], events: [], inferences: [] };
     }

@@ -1,4 +1,4 @@
-import { CharacterProfile, ExperienceEvent, PersonalAnalysis, KeyRelationship, Inference } from '../types';
+import { CharacterProfile, ExperienceEvent, PersonalAnalysis, KeyRelationship, Inference, AIContentRefusedError } from '../types';
 import { characterRepo } from '../repositories/neo4j/character.repo';
 import { callAIStream, AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
@@ -112,6 +112,8 @@ ${stepText.substring(0, 5000)}
       this.saveProfile(novelId, characterId, profile);
       return profile;
     } catch (err) {
+      // AI 内容审核拒绝需要冒泡
+      if (err instanceof AIContentRefusedError) throw err;
       logger.error({ err, characterId }, '角色档案更新失败');
       return existingProfile || this.createEmptyProfile(characterId, character);
     }
