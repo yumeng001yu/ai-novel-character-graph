@@ -8,6 +8,7 @@ export class WriteLogRepo {
     const redis = getRedis();
     const key = `${KEY_PREFIX}${novelId}:${step}`;
     const serialized = entries.map(e => JSON.stringify(e));
+    if (serialized.length === 0) return;
     await redis.rpush(key, ...serialized);
   }
 
