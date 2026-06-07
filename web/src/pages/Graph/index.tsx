@@ -303,13 +303,23 @@ const Graph: React.FC = () => {
                 <>
                   <Divider orientation="left">人物关系（{relations.length}条）</Divider>
                   <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                    {relations.map((r: any, i: number) => (
-                      <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
-                        <Tag color="blue">{r.targetName || r.targetId}</Tag>
-                        <span style={{ color: '#666', fontSize: 12 }}>{r.relationType}</span>
-                        {r.context && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.context}</div>}
-                      </div>
-                    ))}
+                    {relations.map((r: any, i: number) => {
+                      // 判断当前角色在关系的哪一端，显示另一端的角色名
+                      const isSource = r.sourceId === selectedChar;
+                      const otherName = isSource
+                        ? (r.targetName || r.targetId)
+                        : (r.sourceName || r.sourceId);
+                      const otherId = isSource ? r.targetId : r.sourceId;
+                      // 构建关系描述：当前角色 -> 关系类型 -> 对方角色
+                      const direction = isSource ? '→' : '←';
+                      return (
+                        <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                          <Tag color="blue">{otherName}</Tag>
+                          <span style={{ color: '#666', fontSize: 12 }}>{direction} {r.relationType}</span>
+                          {r.description && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.description}</div>}
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               )}
