@@ -88,9 +88,10 @@ export class TaskManagerService {
     if (existing && existing.status === 'failed' && existing.lastCompletedStep !== undefined) {
       // 重置状态为 running，从断点继续
       await taskQueueRepo.updateStatus(novelId, 'running');
-      this.executeBuild(novelId, existing.lastCompletedStep, existing.lastCompletedPhase).catch(err => {
+      this.executeBuild(novelId, existing.lastCompletedStep, existing.lastCompletedPhase).catch(async err => {
         logger.error(err, '续建任务失败');
-        taskQueueRepo.updateStatus(novelId, 'failed');
+        await taskQueueRepo.updateStatus(novelId, 'failed');
+        await progressRepo.setProgress(novelId, { stepNumber: 0, phase: 'snapshot_saving', message: `构建失败: ${err.message}` });
       });
       return;
     }
@@ -106,9 +107,10 @@ export class TaskManagerService {
     await taskQueueRepo.setTask(novelId, task);
 
     // 异步执行构建
-    this.executeBuild(novelId).catch(err => {
+    this.executeBuild(novelId).catch(async err => {
       logger.error(err, '构建任务失败');
-      taskQueueRepo.updateStatus(novelId, 'failed');
+      await taskQueueRepo.updateStatus(novelId, 'failed');
+      await progressRepo.setProgress(novelId, { stepNumber: 0, phase: 'snapshot_saving', message: `构建失败: ${err.message}` });
     });
   }
 
@@ -297,6 +299,11 @@ export class TaskManagerService {
 
     // 完成
     await taskQueueRepo.updateStatus(novelId, 'completed');
+    await progressRepo.setProgress(novelId, {
+      stepNumber: totalSteps,
+      phase: 'snapshot_saving',
+      message: '构建完成',
+    });
     logger.info(`构建任务完成：${novelId}`);
   }
 
