@@ -96,7 +96,9 @@ export interface Inference {
 export interface Relation {
   id: string;
   sourceId: string;
+  sourceName?: string;
   targetId: string;
+  targetName?: string;
   relationType: string;
   sinceChapter: number;
   untilChapter: number | null;

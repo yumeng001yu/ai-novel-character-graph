@@ -40,14 +40,22 @@ export class RelationRepo {
     const session = getSession();
     try {
       const result = await session.run(
-        `MATCH (c1:Character {id: $charId})-[r:RELATES_TO]->(c2:Character) RETURN c1.id AS sourceId, c2.id AS targetId, r
+        `MATCH (c1:Character {id: $charId})-[r:RELATES_TO]->(c2:Character)
+         RETURN c1.id AS sourceId, c1.name AS sourceName, c2.id AS targetId, c2.name AS targetName, r
          UNION
-         MATCH (c2:Character)-[r:RELATES_TO]->(c1:Character {id: $charId}) RETURN c2.id AS sourceId, c1.id AS targetId, r`,
+         MATCH (c2:Character)-[r:RELATES_TO]->(c1:Character {id: $charId})
+         RETURN c2.id AS sourceId, c2.name AS sourceName, c1.id AS targetId, c1.name AS targetName, r`,
         { charId: characterId }
       );
       return result.records.map(r => {
         const rel = r.get('r').properties;
-        return { ...rel, sourceId: r.get('sourceId'), targetId: r.get('targetId') } as Relation;
+        return {
+          ...rel,
+          sourceId: r.get('sourceId'),
+          sourceName: r.get('sourceName'),
+          targetId: r.get('targetId'),
+          targetName: r.get('targetName'),
+        } as Relation;
       });
     } finally {
       await session.close();
