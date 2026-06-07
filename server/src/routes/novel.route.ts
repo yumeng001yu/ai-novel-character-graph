@@ -5,11 +5,17 @@ import { chapterParserService } from '../services/chapter-parser.service';
 import { semanticSegmenterService } from '../services/semantic-segmenter.service';
 import { stepPlannerService } from '../services/step-planner.service';
 import { settingsService } from '../services/settings.service';
+import { taskQueueRepo } from '../repositories/redis/task-queue.repo';
+import { progressRepo } from '../repositories/redis/progress.repo';
+import { writeLogRepo } from '../repositories/redis/write-log.repo';
 import { decodeBuffer } from '../utils/encoding-detector';
 import { estimateTokens, getEncodingForModel } from '../utils/token-counter';
 import { getConfig } from '../config';
+import { getLogger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
+
+const logger = getLogger();
 
 export async function novelRoutes(app: FastifyInstance) {
   // 上传 TXT（静态路径，避免与动态路由冲突）
@@ -110,6 +116,60 @@ export async function novelRoutes(app: FastifyInstance) {
   app.get('/', async (req, reply) => {
     const novels = await novelRepo.findAll();
     reply.send(novels);
+  });
+
+  // 删除小说（清理所有关联数据）
+  app.delete('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+
+    // 安全校验
+    if (!/^[a-f0-9-]+$/.test(id)) {
+      return reply.status(400).send({ error: '无效的小说ID' });
+    }
+
+    const novel = await novelRepo.findById(id);
+    if (!novel) return reply.status(404).send({ error: '小说未找到' });
+
+    // 检查是否有运行中的构建任务
+    const task = await taskQueueRepo.getTask(id);
+    if (task && task.status === 'running') {
+      return reply.status(400).send({ error: '该小说有正在运行的构建任务，请先取消' });
+    }
+
+    try {
+      // 1. 删除 Neo4j 数据（DETACH DELETE 会级联删除所有关联节点和关系）
+      await novelRepo.deleteById(id);
+
+      // 2. 删除 Redis 数据
+      await taskQueueRepo.deleteTask(id);
+      await progressRepo.deleteProgress(id);
+      // 删除写操作日志（扫描所有步的 key）
+      const redis = (await import('../repositories/redis/connection')).getRedis();
+      const writeLogKeys = await redis.keys(`writelog:${id}:*`);
+      if (writeLogKeys.length > 0) {
+        await redis.del(...writeLogKeys);
+      }
+
+      // 3. 删除文件系统数据
+      const snapshotDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', id);
+      if (fs.existsSync(snapshotDir)) {
+        fs.rmSync(snapshotDir, { recursive: true, force: true });
+      }
+      const profilesDir = path.resolve(getConfig().build.snapshot_dir, '..', 'profiles', id);
+      if (fs.existsSync(profilesDir)) {
+        fs.rmSync(profilesDir, { recursive: true, force: true });
+      }
+      const snapshotsDataDir = path.resolve(getConfig().build.snapshot_dir, id);
+      if (fs.existsSync(snapshotsDataDir)) {
+        fs.rmSync(snapshotsDataDir, { recursive: true, force: true });
+      }
+
+      logger.info(`小说已删除：${id} (${novel.name})`);
+      reply.send({ success: true, message: `已删除小说「${novel.name}」` });
+    } catch (err) {
+      logger.error(err, '删除小说失败');
+      reply.status(500).send({ error: '删除失败' });
+    }
   });
 
   // 小说详情（动态路由放最后）

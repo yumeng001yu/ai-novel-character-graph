@@ -14,6 +14,7 @@ export const textPaste = (data: { content: string; novelName?: string }) =>
   api.post('/novels/text-paste', data);
 export const getNovels = () => api.get('/novels');
 export const getNovel = (id: string) => api.get(`/novels/${id}`);
+export const deleteNovel = (id: string) => api.delete(`/novels/${id}`);
 
 // 图谱
 export const getGraph = (novelId: string, params?: { center?: string; step?: number }) =>

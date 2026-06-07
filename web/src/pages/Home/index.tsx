@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Upload, Button, Input, Radio, Table, message, Modal } from 'antd';
-import { InboxOutlined, FileTextOutlined } from '@ant-design/icons';
-import { uploadNovel, textPaste, getNovels } from '../../services/api';
+import { Card, Upload, Button, Input, Radio, Table, message, Modal, Popconfirm } from 'antd';
+import { InboxOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
+import { uploadNovel, textPaste, getNovels, deleteNovel } from '../../services/api';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
@@ -54,6 +54,16 @@ const Home: React.FC = () => {
     setLoading(false);
   };
 
+  const handleDelete = async (id: string, name: string) => {
+    try {
+      const res = await deleteNovel(id);
+      message.success(res.data?.message || `已删除「${name}」`);
+      loadNovels();
+    } catch (err: any) {
+      message.error(err.response?.data?.error || '删除失败');
+    }
+  };
+
   const columns = [
     { title: '小说名', dataIndex: 'name', key: 'name' },
     { title: '字数', dataIndex: 'totalChars', key: 'totalChars' },
@@ -63,6 +73,21 @@ const Home: React.FC = () => {
     }[v] || v) },
     { title: '当前步', dataIndex: 'currentStep', key: 'currentStep' },
     { title: '总步数', dataIndex: 'totalSteps', key: 'totalSteps' },
+    {
+      title: '操作', key: 'action', width: 80,
+      render: (_: any, record: any) => (
+        <Popconfirm
+          title={`确认删除「${record.name}」？`}
+          description="将删除该小说的所有数据（图谱、快照、档案等），此操作不可撤销。"
+          onConfirm={() => handleDelete(record.id, record.name)}
+          okText="确认删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+        </Popconfirm>
+      ),
+    },
   ];
 
   return (
