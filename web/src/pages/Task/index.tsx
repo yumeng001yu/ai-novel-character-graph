@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space, Tooltip, Tag, Typography, Empty } from 'antd';
+import { Card, Button, Progress, Select, Steps, message, Descriptions, Alert, Space, Tooltip, Tag, Typography, Empty, theme } from 'antd';
 import { ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { startBuild, cancelBuild, getCostEstimate, getNovels, getTaskStatus } from '../../services/api';
 
@@ -77,6 +77,7 @@ function formatTokens(n?: number): string {
 }
 
 const Task: React.FC = () => {
+  const { token: themeToken } = theme.useToken();
   const [novels, setNovels] = useState<any[]>([]);
   const [novelId, setNovelId] = useState<string>('');
   const [progress, setProgress] = useState<any>(null);
@@ -442,7 +443,7 @@ const Task: React.FC = () => {
                   {streamingCount > 0 && (
                     <Tag color="cyan">AI 输出中 x{streamingCount}</Tag>
                   )}
-                  <span style={{ color: '#888', fontSize: 12 }}>离开此页面不会中断构建，返回后将自动恢复进度显示</span>
+                  <span style={{ color: themeToken.colorTextSecondary, fontSize: 12 }}>离开此页面不会中断构建，返回后将自动恢复进度显示</span>
                 </div>
               )}
             </div>
@@ -503,7 +504,7 @@ const Task: React.FC = () => {
                 <div
                   style={{
                     padding: '6px 12px',
-                    background: log.status === 'error' ? '#fff2f0' : log.status === 'streaming' ? '#e6f7ff' : '#f6ffed',
+                    background: log.status === 'error' ? themeToken.colorErrorBg : log.status === 'streaming' ? themeToken.colorInfoBg : themeToken.colorSuccessBg,
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
@@ -518,7 +519,7 @@ const Task: React.FC = () => {
                   }}
                 >
                   {log.status === 'streaming' ? (
-                    <LoadingOutlined style={{ color: '#1890ff' }} />
+                    <LoadingOutlined style={{ color: themeToken.colorPrimary }} />
                   ) : log.status === 'error' ? (
                     <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
                   ) : (
@@ -554,7 +555,7 @@ const Task: React.FC = () => {
                   {/* 流式文本（打字机效果） */}
                   <div
                     style={{
-                      background: '#f9f9f9',
+                      background: themeToken.colorFillQuaternary,
                       padding: 8,
                       borderRadius: 4,
                       border: '1px solid #d9d9d9',
@@ -569,7 +570,7 @@ const Task: React.FC = () => {
                   >
                     {log.streamingText || (log.status === 'streaming' ? '▌' : '')}
                     {log.status === 'streaming' && (
-                      <span style={{ animation: 'blink 1s infinite', color: '#1890ff' }}>▌</span>
+                      <span style={{ animation: 'blink 1s infinite', color: themeToken.colorPrimary }}>▌</span>
                     )}
                   </div>
                 </div>
@@ -582,7 +583,7 @@ const Task: React.FC = () => {
                       <div style={{ marginBottom: 8 }}>
                         <Text strong style={{ color: '#722ed1' }}>系统提示词：</Text>
                         <Paragraph
-                          style={{ marginBottom: 0, fontSize: 12, color: '#666', whiteSpace: 'pre-wrap' }}
+                          style={{ marginBottom: 0, fontSize: 12, color: themeToken.colorTextSecondary, whiteSpace: 'pre-wrap' }}
                           ellipsis={{ rows: 3, expandable: 'collapsible', symbol: '展开' }}
                         >
                           {log.systemPrompt}
@@ -593,9 +594,9 @@ const Task: React.FC = () => {
                     {/* 用户提示词 */}
                     {log.prompt && (
                       <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#1890ff' }}>提示词：</Text>
+                        <Text strong style={{ color: themeToken.colorPrimary }}>提示词：</Text>
                         <Paragraph
-                          style={{ marginBottom: 0, fontSize: 12, color: '#333', whiteSpace: 'pre-wrap' }}
+                          style={{ marginBottom: 0, fontSize: 12, color: themeToken.colorText, whiteSpace: 'pre-wrap' }}
                           ellipsis={{ rows: 5, expandable: 'collapsible', symbol: '展开' }}
                         >
                           {log.prompt}
@@ -606,16 +607,16 @@ const Task: React.FC = () => {
                     {/* 错误信息 */}
                     {log.error && (
                       <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#ff4d4f' }}>错误：</Text>
+                        <Text strong style={{ color: themeToken.colorError }}>错误：</Text>
                         <Paragraph
                           style={{
                             marginBottom: 0,
                             fontSize: 12,
-                            color: '#ff4d4f',
-                            background: '#fff2f0',
+                            color: themeToken.colorError,
+                            background: themeToken.colorErrorBg,
                             padding: 8,
                             borderRadius: 4,
-                            border: '1px solid #ffccc7',
+                            border: `1px solid ${themeToken.colorErrorBorder}`,
                           }}
                         >
                           {log.error}

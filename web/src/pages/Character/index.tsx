@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Input, Button, Descriptions, Timeline, Tag, Table, Space, message, Select } from 'antd';
+import { Card, Input, Button, Descriptions, Timeline, Tag, Table, Space, message, Select, theme } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { searchCharacters, getCharacterTimeline, getNovels } from '../../services/api';
 
 const Character: React.FC = () => {
+  const { token: themeToken } = theme.useToken();
   const [novels, setNovels] = useState<any[]>([]);
   const [novelId, setNovelId] = useState<string>('');
   const [keyword, setKeyword] = useState('');
@@ -83,9 +84,9 @@ const Character: React.FC = () => {
                 <>
                   <h4>推断 <Tag color="blue">推断</Tag></h4>
                   {timeline.personalAnalysis.inferences.map((inf: any, i: number) => (
-                    <div key={i} style={{ marginBottom: 8, padding: 8, background: '#e6f7ff', borderRadius: 4 }}>
+                    <div key={i} style={{ marginBottom: 8, padding: 8, background: themeToken.colorInfoBg, borderRadius: 4 }}>
                       <div>{inf.content} <Tag color="blue">推断</Tag></div>
-                      <div style={{ fontSize: 12, color: '#666' }}>依据：{inf.basis}</div>
+                      <div style={{ fontSize: 12, color: themeToken.colorTextSecondary }}>依据：{inf.basis}</div>
                     </div>
                   ))}
                 </>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Upload, Input, Button, message, Alert, Select, Space } from 'antd';
+import { Card, Upload, Input, Button, message, Alert, Select, Space, theme } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import { continueUpload, continuePaste, continueCheck, getNovels } from '../../services/api';
 
@@ -7,6 +7,7 @@ const { TextArea } = Input;
 const { Dragger } = Upload;
 
 const Continue: React.FC = () => {
+  const { token: themeToken } = theme.useToken();
   const [novels, setNovels] = useState<any[]>([]);
   const [novelId, setNovelId] = useState<string>('');
   const [pasteContent, setPasteContent] = useState('');
@@ -77,7 +78,7 @@ const Continue: React.FC = () => {
 
       <Card title="上传续建文件" style={{ marginBottom: 24 }}>
         <Dragger accept=".txt" showUploadList={false} beforeUpload={(file) => { handleUpload(file); return false; }} disabled={!novelId || loading}>
-          <p><InboxOutlined style={{ fontSize: 48, color: '#1890ff' }} /></p>
+          <p><InboxOutlined style={{ fontSize: 48, color: themeToken.colorPrimary }} /></p>
           <p>拖拽或点击上传续建文件</p>
         </Dragger>
       </Card>

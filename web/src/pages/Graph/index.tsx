@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Select, Slider, Button, Space, Spin, message, Modal, Empty, Input, Descriptions, Tag, Timeline, Divider } from 'antd';
+import { Card, Select, Slider, Button, Space, Spin, message, Modal, Empty, Input, Descriptions, Tag, Timeline, Divider, theme } from 'antd';
 import { RollbackOutlined, ExportOutlined, SearchOutlined } from '@ant-design/icons';
 import { getGraph, getSnapshots, getNovels, rollback, exportGraph, getCharacter, getCharacterTimeline } from '../../services/api';
 import G6 from '@antv/g6';
 
 const Graph: React.FC = () => {
+  const { token } = theme.useToken();
   const [novels, setNovels] = useState<any[]>([]);
   const [selectedNovel, setSelectedNovel] = useState<string>('');
   const [snapshots, setSnapshots] = useState<any[]>([]);
@@ -106,6 +107,12 @@ const Graph: React.FC = () => {
     const width = containerRef.current.offsetWidth;
     const height = containerRef.current.offsetHeight || 600;
 
+    const primaryColor = token.colorPrimary;
+    const primaryBg = token.colorBgContainer;
+    const textColor = token.colorText;
+    const textSecondary = token.colorTextSecondary;
+    const borderColor = token.colorBorder;
+
     const graph = new G6.Graph({
       container: containerRef.current,
       width,
@@ -125,22 +132,22 @@ const Graph: React.FC = () => {
       },
       defaultNode: {
         size: 40,
-        style: { fill: '#1890ff', stroke: '#096dd9' },
+        style: { fill: primaryColor, stroke: primaryColor },
         labelCfg: {
           position: 'bottom',
-          style: { fontSize: 12, fill: '#333' },
+          style: { fontSize: 12, fill: textColor },
           offset: 6,
         },
       },
       defaultEdge: {
-        style: { stroke: '#a3b1bf', lineWidth: 1 },
+        style: { stroke: borderColor, lineWidth: 1 },
         labelCfg: {
-          style: { fontSize: 10, fill: '#666', background: { fill: '#fff', padding: [2, 4, 2, 4], radius: 2 } },
+          style: { fontSize: 10, fill: textSecondary, background: { fill: primaryBg, padding: [2, 4, 2, 4], radius: 2 } },
           autoRotate: true,
         },
       },
       nodeStateStyles: {
-        hover: { shadowColor: '#1890ff', shadowBlur: 12 },
+        hover: { shadowColor: primaryColor, shadowBlur: 12 },
         selected: { shadowColor: '#fa8c16', shadowBlur: 15 },
       },
       modes: {
@@ -160,7 +167,7 @@ const Graph: React.FC = () => {
       type: 'circle',
       size: n.isProtagonist ? 65 : (data.centerId === n.id ? 55 : 45),
       style: {
-        fill: data.centerId === n.id ? '#fa8c16' : (n.isProtagonist ? '#f5222d' : '#1890ff'),
+        fill: data.centerId === n.id ? '#fa8c16' : (n.isProtagonist ? '#f5222d' : primaryColor),
       },
     }));
 
@@ -168,7 +175,7 @@ const Graph: React.FC = () => {
       source: e.source || e.sourceId,
       target: e.target || e.targetId,
       label: e.relationType || '',
-      style: e.isInference ? { lineDash: [5, 5], stroke: '#1890ff' } : {},
+      style: e.isInference ? { lineDash: [5, 5], stroke: primaryColor } : {},
     }));
 
     graph.data({ nodes, edges });
@@ -313,10 +320,10 @@ const Graph: React.FC = () => {
                       // 构建关系描述：当前角色 -> 关系类型 -> 对方角色
                       const direction = isSource ? '→' : '←';
                       return (
-                        <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                        <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: token.colorFillQuaternary, borderRadius: 4 }}>
                           <Tag color="blue">{otherName}</Tag>
-                          <span style={{ color: '#666', fontSize: 12 }}>{direction} {r.relationType}</span>
-                          {r.description && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.description}</div>}
+                          <span style={{ color: token.colorTextSecondary, fontSize: 12 }}>{direction} {r.relationType}</span>
+                          {r.description && <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 2 }}>{r.description}</div>}
                         </div>
                       );
                     })}

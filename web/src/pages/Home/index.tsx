@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Upload, Button, Input, Radio, Table, message, Modal, Popconfirm } from 'antd';
+import { Card, Upload, Button, Input, Radio, Table, message, Modal, Popconfirm, theme } from 'antd';
 import { InboxOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
 import { uploadNovel, textPaste, getNovels, deleteNovel } from '../../services/api';
 
@@ -7,6 +7,7 @@ const { TextArea } = Input;
 const { Dragger } = Upload;
 
 const Home: React.FC = () => {
+  const { token: themeToken } = theme.useToken();
   const [novels, setNovels] = useState<any[]>([]);
   const [hasChapter, setHasChapter] = useState(true);
   const [pasteVisible, setPasteVisible] = useState(false);
@@ -103,7 +104,7 @@ const Home: React.FC = () => {
           beforeUpload={(file) => { handleUpload(file); return false; }}
           disabled={loading}
         >
-          <p><InboxOutlined style={{ fontSize: 48, color: '#1890ff' }} /></p>
+          <p><InboxOutlined style={{ fontSize: 48, color: themeToken.colorPrimary }} /></p>
           <p>点击或拖拽 TXT 文件到此处上传</p>
         </Dragger>
         <div style={{ textAlign: 'center', marginTop: 16 }}>

@@ -1,6 +1,7 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: background 0.3s, color 0.3s;
 }
 
 #root {
@@ -10,9 +11,9 @@ body {
 .graph-container {
   width: 100%;
   height: 70vh;
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
   border-radius: 8px;
-  background: #fff;
+  background: var(--ant-color-bg-container, #fff);
 }
 
 .character-detail-card {
@@ -21,10 +22,39 @@ body {
 }
 
 .inference-badge {
-  background: #e6f7ff;
-  border: 1px solid #91d5ff;
-  color: #1890ff;
+  background: var(--ant-color-primary-bg, #e6f7ff);
+  border: 1px solid var(--ant-color-primary-border, #91d5ff);
+  color: var(--ant-color-primary, #1677ff);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+/* 暗色主题下的滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.5);
+}
+
+/* Ant Design Menu 暗色主题适配 */
+.ant-menu-dark {
+  background: transparent !important;
+}
+
+/* 暗色主题下 Dropdown 菜单适配 */
+.ant-dropdown {
+  z-index: 1050;
 }
