@@ -6,7 +6,7 @@ neo4j:
   uri: bolt://neo4j:7687
   username: neo4j
   password: novelgraph123
-  database: novel_graph
+  database: neo4j
 
 redis:
   host: redis

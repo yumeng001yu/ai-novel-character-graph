@@ -9,6 +9,9 @@ import { settingsRoutes } from './settings.route';
 import { exportRoutes } from './export.route';
 
 export function registerRoutes(app: FastifyInstance): void {
+  // 健康检查（轻量，不查数据库）
+  app.get('/api/health', async () => ({ status: 'ok' }));
+
   // 设置路由（独立前缀，无动态参数冲突）
   app.register(settingsRoutes, { prefix: '/api/settings' });
 
