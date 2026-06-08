@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
 import { chapterRepo } from '../repositories/neo4j/chapter.repo';
+import { characterRepo } from '../repositories/neo4j/character.repo';
+import { relationRepo } from '../repositories/neo4j/relation.repo';
 import { chapterParserService } from '../services/chapter-parser.service';
 import { semanticSegmenterService } from '../services/semantic-segmenter.service';
 import { stepPlannerService } from '../services/step-planner.service';
@@ -170,6 +172,25 @@ export async function novelRoutes(app: FastifyInstance) {
       logger.error(err, '删除小说失败');
       reply.status(500).send({ error: '删除失败' });
     }
+  });
+
+  // 小说统计信息（静态路径，在动态路由之前）
+  app.get('/:id/stats', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const novel = await novelRepo.findById(id);
+    if (!novel) return reply.status(404).send({ error: '小说未找到' });
+
+    const characters = await characterRepo.findByNovelId(id);
+    const relations = await relationRepo.findByNovelId(id);
+    const task = await taskQueueRepo.getTask(id);
+
+    reply.send({
+      graphBuilt: characters.length > 0,
+      totalTokens: novel.totalTokens,
+      characterCount: characters.length,
+      relationCount: relations.length,
+      buildStatus: task?.status || 'pending',
+    });
   });
 
   // 小说详情（动态路由放最后）

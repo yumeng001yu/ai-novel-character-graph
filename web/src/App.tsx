@@ -1,11 +1,10 @@
 import React from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Dropdown, Button } from 'antd';
-import { BookOutlined, ApartmentOutlined, UserOutlined, SettingOutlined, ThunderboltOutlined, CloudUploadOutlined, BgColorsOutlined } from '@ant-design/icons';
-import Home from './pages/Home';
-import Graph from './pages/Graph';
-import Character from './pages/Character';
-import Continue from './pages/Continue';
+import { CloudUploadOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined, BgColorsOutlined } from '@ant-design/icons';
+import Import from './pages/Import';
+import Knowledge from './pages/Knowledge';
+import NovelDetail from './pages/NovelDetail';
 import Task from './pages/Task';
 import Settings from './pages/Settings';
 import { ThemeKey, themePresets } from './themes';
@@ -13,19 +12,15 @@ import { ThemeKey, themePresets } from './themes';
 const { Header, Content } = Layout;
 
 const menuItems = [
-  { key: 'home', icon: <CloudUploadOutlined />, label: '首页', path: '/' },
-  { key: 'graph', icon: <ApartmentOutlined />, label: '图谱', path: '/graph' },
-  { key: 'character', icon: <UserOutlined />, label: '角色', path: '/character' },
-  { key: 'continue', icon: <BookOutlined />, label: '续建', path: '/continue' },
-  { key: 'task', icon: <ThunderboltOutlined />, label: '任务', path: '/task' },
+  { key: 'import', icon: <CloudUploadOutlined />, label: '导入', path: '/import' },
+  { key: 'knowledge', icon: <DatabaseOutlined />, label: '知识库', path: '/knowledge' },
+  { key: 'task', icon: <ThunderboltOutlined />, label: '构建', path: '/task' },
   { key: 'settings', icon: <SettingOutlined />, label: '设置', path: '/settings' },
 ];
 
 const pathToKey: Record<string, string> = {
-  '/': 'home',
-  '/graph': 'graph',
-  '/character': 'character',
-  '/continue': 'continue',
+  '/import': 'import',
+  '/knowledge': 'knowledge',
   '/task': 'task',
   '/settings': 'settings',
 };
@@ -38,7 +33,11 @@ interface AppProps {
 const App: React.FC<AppProps> = ({ themeKey, setThemeKey }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const currentKey = pathToKey[location.pathname] || 'home';
+
+  // 对于 /novel/:id 路径，高亮知识库菜单
+  const currentKey = location.pathname.startsWith('/novel/')
+    ? 'knowledge'
+    : (pathToKey[location.pathname] || 'import');
   const preset = themePresets[themeKey];
 
   const themeMenuItems = Object.values(themePresets).map(t => ({
@@ -99,13 +98,12 @@ const App: React.FC<AppProps> = ({ themeKey, setThemeKey }) => {
       </Header>
       <Content style={{ padding: '24px', background: preset.contentBg }}>
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/graph" element={<Graph />} />
-          <Route path="/character" element={<Character />} />
-          <Route path="/continue" element={<Continue />} />
+          <Route path="/import" element={<Import />} />
+          <Route path="/knowledge" element={<Knowledge />} />
+          <Route path="/novel/:id" element={<NovelDetail />} />
           <Route path="/task" element={<Task />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" />} />
+          <Route path="*" element={<Navigate to="/import" />} />
         </Routes>
       </Content>
     </Layout>

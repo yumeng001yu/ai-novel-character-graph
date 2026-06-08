@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Select, Slider, Button, Space, Spin, message, Modal, Empty, Input, Descriptions, Tag, Timeline, Divider, theme } from 'antd';
+import { Slider, Button, Space, Spin, message, Modal, Input, Descriptions, Tag, Timeline, Divider, theme } from 'antd';
 import { RollbackOutlined, ExportOutlined, SearchOutlined } from '@ant-design/icons';
-import { getGraph, getSnapshots, getNovels, rollback, exportGraph, getCharacter, getCharacterTimeline } from '../../services/api';
+import { getGraph, getSnapshots, rollback, exportGraph, getCharacter, getCharacterTimeline } from '../../services/api';
 import G6 from '@antv/g6';
 
-const Graph: React.FC = () => {
+interface Props {
+  novelId: string;
+}
+
+const GraphTab: React.FC<Props> = ({ novelId }) => {
   const { token } = theme.useToken();
-  const [novels, setNovels] = useState<any[]>([]);
-  const [selectedNovel, setSelectedNovel] = useState<string>('');
   const [snapshots, setSnapshots] = useState<any[]>([]);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -19,7 +21,10 @@ const Graph: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<any>(null);
 
-  useEffect(() => { loadNovels(); }, []);
+  useEffect(() => {
+    loadGraph(novelId);
+    loadSnapshots(novelId);
+  }, [novelId]);
 
   // 组件卸载时销毁 G6 实例
   useEffect(() => {
@@ -31,23 +36,14 @@ const Graph: React.FC = () => {
     };
   }, []);
 
-  const loadNovels = async () => {
-    try {
-      const res = await getNovels();
-      setNovels(res.data || []);
-    } catch (err) {
-      message.error('加载小说列表失败');
-    }
-  };
-
-  const loadGraph = async (novelId: string, step?: number, center?: string) => {
-    if (!novelId) return;
+  const loadGraph = async (nid: string, step?: number, center?: string) => {
+    if (!nid) return;
     setLoading(true);
     try {
       const params: any = {};
       if (step) params.step = step;
       if (center) params.center = center;
-      const res = await getGraph(novelId, params);
+      const res = await getGraph(nid, params);
       renderGraph(res.data);
     } catch (err) {
       message.error('加载图谱失败');
@@ -55,9 +51,9 @@ const Graph: React.FC = () => {
     setLoading(false);
   };
 
-  const loadSnapshots = async (novelId: string) => {
+  const loadSnapshots = async (nid: string) => {
     try {
-      const res = await getSnapshots(novelId);
+      const res = await getSnapshots(nid);
       setSnapshots(res.data || []);
       if (res.data?.length > 0) {
         setCurrentStep(res.data[res.data.length - 1].step);
@@ -67,16 +63,9 @@ const Graph: React.FC = () => {
     }
   };
 
-  const handleNovelChange = (novelId: string) => {
-    setSelectedNovel(novelId);
-    setCenterName('');
-    loadGraph(novelId);
-    loadSnapshots(novelId);
-  };
-
   const handleCenterSearch = () => {
-    if (!selectedNovel || !centerName.trim()) return;
-    loadGraph(selectedNovel, currentStep || undefined, centerName.trim());
+    if (!novelId || !centerName.trim()) return;
+    loadGraph(novelId, currentStep || undefined, centerName.trim());
   };
 
   const handleNodeClick = async (nodeId: string) => {
@@ -90,7 +79,6 @@ const Graph: React.FC = () => {
       setCharDetail(detailRes.data);
       setCharTimeline(timelineRes.data?.experienceTimeline || []);
     } catch {
-      // 如果详情接口失败，只显示节点ID
       setCharDetail({ character: { id: nodeId, name: nodeId } });
       setCharTimeline([]);
     }
@@ -155,7 +143,6 @@ const Graph: React.FC = () => {
       },
     });
 
-    // 节点点击
     graph.on('node:click', (evt: any) => {
       const nodeId = evt.item.getID();
       handleNodeClick(nodeId);
@@ -181,10 +168,8 @@ const Graph: React.FC = () => {
     graph.data({ nodes, edges });
     graph.render();
 
-    // 力导向布局稳定后：1) 自适应画布显示所有节点 2) 聚焦主角
     graph.on('layout:end', () => {
       graph.fitView([40, 40]);
-      // 找到第一个主角节点，聚焦到该位置
       const protagonist = (data.nodes || []).find((n: any) => n.isProtagonist);
       if (protagonist) {
         const nodeItem = graph.findById(protagonist.id);
@@ -198,16 +183,16 @@ const Graph: React.FC = () => {
   };
 
   const handleRollback = async () => {
-    if (!selectedNovel || !currentStep) return;
+    if (!novelId || !currentStep) return;
     Modal.confirm({
       title: `确认回退到第 ${currentStep} 步？`,
       content: '回退将删除该步之后的所有数据，此操作不可撤销。',
       onOk: async () => {
         try {
-          await rollback(selectedNovel, currentStep);
+          await rollback(novelId, currentStep);
           message.success('回退成功');
-          loadGraph(selectedNovel);
-          loadSnapshots(selectedNovel);
+          loadGraph(novelId);
+          loadSnapshots(novelId);
         } catch (err) {
           message.error('回退失败');
         }
@@ -216,9 +201,9 @@ const Graph: React.FC = () => {
   };
 
   const handleExport = async (format: string) => {
-    if (!selectedNovel) return;
+    if (!novelId) return;
     try {
-      const res = await exportGraph(selectedNovel, format);
+      const res = await exportGraph(novelId, format);
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
@@ -235,11 +220,8 @@ const Graph: React.FC = () => {
 
   return (
     <div>
-      <Card title="图谱查看" extra={
-        <Space>
-          <Select style={{ width: 200 }} placeholder="选择小说" value={selectedNovel || undefined}
-            onChange={handleNovelChange}
-            options={novels.map((n: any) => ({ label: n.name, value: n.id }))} />
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <Space wrap>
           <Input
             style={{ width: 150 }}
             placeholder="中心角色名"
@@ -248,27 +230,23 @@ const Graph: React.FC = () => {
             onPressEnter={handleCenterSearch}
             allowClear
           />
-          <Button icon={<SearchOutlined />} onClick={handleCenterSearch} disabled={!selectedNovel}>定位</Button>
-          <Button icon={<RollbackOutlined />} onClick={handleRollback} disabled={!selectedNovel}>回退</Button>
-          <Button icon={<ExportOutlined />} onClick={() => handleExport('json')} disabled={!selectedNovel}>导出</Button>
+          <Button icon={<SearchOutlined />} onClick={handleCenterSearch}>定位</Button>
+          <Button icon={<RollbackOutlined />} onClick={handleRollback}>回退</Button>
+          <Button icon={<ExportOutlined />} onClick={() => handleExport('json')}>导出</Button>
         </Space>
-      }>
-        {snapshots.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <span>时间轴（步）： </span>
-            <Slider min={1} max={snapshots.length} value={currentStep || snapshots.length}
-              onChange={(v) => { setCurrentStep(v); loadGraph(selectedNovel, v, centerName || undefined); }}
-              marks={Object.fromEntries(snapshots.map((s: any) => [s.step, `第${s.step}步`]))} />
-          </div>
-        )}
-        <Spin spinning={loading}>
-          {selectedNovel ? (
-            <div ref={containerRef} className="graph-container" />
-          ) : (
-            <Empty description="请先选择一部小说" />
-          )}
-        </Spin>
-      </Card>
+      </div>
+
+      {snapshots.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <span>时间轴（步）： </span>
+          <Slider min={1} max={snapshots.length} value={currentStep || snapshots.length}
+            onChange={(v) => { setCurrentStep(v); loadGraph(novelId, v, centerName || undefined); }}
+            marks={Object.fromEntries(snapshots.map((s: any) => [s.step, `第${s.step}步`]))} />
+        </div>
+      )}
+      <Spin spinning={loading}>
+        <div ref={containerRef} className="graph-container" />
+      </Spin>
 
       {/* 角色详情弹窗 */}
       <Modal
@@ -321,12 +299,10 @@ const Graph: React.FC = () => {
                   <Divider orientation="left">人物关系（{relations.length}条）</Divider>
                   <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                     {relations.map((r: any, i: number) => {
-                      // 判断当前角色在关系的哪一端，显示另一端的角色名
                       const isSource = r.sourceId === selectedChar;
                       const otherName = isSource
                         ? (r.targetName || r.targetId)
                         : (r.sourceName || r.sourceId);
-                      // 构建关系描述：当前角色 -> 关系类型 -> 对方角色
                       const direction = isSource ? '→' : '←';
                       return (
                         <div key={i} style={{ marginBottom: 8, padding: '4px 8px', background: token.colorFillQuaternary, borderRadius: 4 }}>
@@ -347,4 +323,4 @@ const Graph: React.FC = () => {
   );
 };
 
-export default Graph;
+export default GraphTab;

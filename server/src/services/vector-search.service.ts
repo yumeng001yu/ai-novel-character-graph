@@ -1,4 +1,5 @@
 import { characterRepo } from '../repositories/neo4j/character.repo';
+import { textChunkRepo } from '../repositories/neo4j/text-chunk.repo';
 import { embeddingService } from './embedding.service';
 import { rerankerService } from './reranker.service';
 import { VectorSearchResult } from '../types';
@@ -49,22 +50,6 @@ export class VectorSearchService {
       }
     } catch (err) {
       logger.warn({ err }, '批量角色向量化失败（非致命）');
-    }
-  }
-
-  /**
-   * 确保向量索引存在
-   */
-  async ensureVectorIndex(): Promise<void> {
-    if (!(await embeddingService.isConfigured())) return;
-
-    try {
-      const config = await embeddingService.getConfig();
-      if (config) {
-        await characterRepo.ensureVectorIndex(config.dimensions);
-      }
-    } catch (err) {
-      logger.warn(err, '创建向量索引失败（非致命）');
     }
   }
 
@@ -176,6 +161,70 @@ export class VectorSearchService {
     } catch (err) {
       logger.warn({ err }, '隐含关系发现失败（非致命）');
       return [];
+    }
+  }
+
+  /**
+   * 为文本块生成 embedding 并存储
+   */
+  async indexTextChunk(chunkId: string, text: string): Promise<void> {
+    if (!(await embeddingService.isConfigured())) return;
+
+    try {
+      const embedding = await embeddingService.embed(text);
+      await textChunkRepo.setEmbedding(chunkId, embedding);
+    } catch (err) {
+      logger.warn({ err, chunkId }, '文本块向量化失败（非致命）');
+    }
+  }
+
+  /**
+   * 批量为文本块生成 embedding 并存储
+   */
+  async indexTextChunks(chunks: Array<{ id: string; text: string }>): Promise<void> {
+    if (!(await embeddingService.isConfigured())) return;
+    if (chunks.length === 0) return;
+
+    try {
+      const texts = chunks.map(c => c.text);
+      const embeddings = await embeddingService.embedBatch(texts);
+      for (let i = 0; i < chunks.length; i++) {
+        await textChunkRepo.setEmbedding(chunks[i].id, embeddings[i]);
+      }
+    } catch (err) {
+      logger.warn({ err }, '批量文本块向量化失败（非致命）');
+    }
+  }
+
+  /**
+   * 搜索相关原文段落
+   */
+  async searchTextChunks(novelId: string, query: string, topK: number = 5): Promise<Array<{ id: string; stepNumber: number; chapterRange: string; text: string; score: number }>> {
+    if (!(await embeddingService.isConfigured())) return [];
+
+    try {
+      const queryEmbedding = await embeddingService.embed(query);
+      return await textChunkRepo.vectorSearch(novelId, queryEmbedding, topK);
+    } catch (err) {
+      logger.warn({ err }, '原文段落搜索失败（非致命）');
+      return [];
+    }
+  }
+
+  /**
+   * 确保向量索引存在（包括 TextChunk 索引）
+   */
+  async ensureVectorIndex(): Promise<void> {
+    if (!(await embeddingService.isConfigured())) return;
+
+    try {
+      const config = await embeddingService.getConfig();
+      if (config) {
+        await characterRepo.ensureVectorIndex(config.dimensions);
+        await textChunkRepo.ensureVectorIndex(config.dimensions);
+      }
+    } catch (err) {
+      logger.warn(err, '创建向量索引失败（非致命）');
     }
   }
 }

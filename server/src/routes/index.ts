@@ -7,6 +7,8 @@ import { taskRoutes } from './task.route';
 import { continueRoutes } from './continue.route';
 import { settingsRoutes } from './settings.route';
 import { exportRoutes } from './export.route';
+import { graphragRoutes } from './graphrag.route';
+import { knowledgeBaseRoutes } from './knowledge-base.route';
 
 export function registerRoutes(app: FastifyInstance): void {
   // 健康检查（轻量，不查数据库）
@@ -26,4 +28,10 @@ export function registerRoutes(app: FastifyInstance): void {
   app.register(taskRoutes, { prefix: '/api/novels' });
   app.register(continueRoutes, { prefix: '/api/novels' });
   app.register(exportRoutes, { prefix: '/api/novels' });
+
+  // GraphRAG 查询路由
+  app.register(graphragRoutes, { prefix: '/api/graphrag' });
+
+  // 知识库路由
+  app.register(knowledgeBaseRoutes, { prefix: '/api/knowledge-base' });
 }

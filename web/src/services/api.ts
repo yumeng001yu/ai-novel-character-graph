@@ -82,4 +82,17 @@ export const testRerankerConnection = (apiUrl: string, apiKey: string, model: st
 export const exportGraph = (novelId: string, format: string) =>
   api.get(`/novels/${novelId}/export`, { params: { format }, responseType: 'blob' });
 
+// 知识库
+export const getKnowledgeBase = () => api.get('/knowledge-base');
+export const searchKnowledgeBase = (q: string) => api.get('/knowledge-base/search', { params: { q } });
+
+// 小说详情
+export const getNovelDetail = (id: string) => api.get(`/novels/${id}`);
+export const getNovelText = (id: string) => api.get(`/novels/${id}/text`);
+export const getNovelChapters = (id: string) => api.get(`/novels/${id}/chapters`);
+
+// GraphRAG
+export const queryGraphRAG = (novelId: string, question: string) =>
+  api.post(`/graphrag/${novelId}/query`, { question });
+
 export default api;

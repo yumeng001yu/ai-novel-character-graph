@@ -4,6 +4,7 @@ import { progressRepo } from '../repositories/redis/progress.repo';
 import { novelRepo } from '../repositories/neo4j/novel.repo';
 import { chapterRepo } from '../repositories/neo4j/chapter.repo';
 import { characterRepo } from '../repositories/neo4j/character.repo';
+import { textChunkRepo } from '../repositories/neo4j/text-chunk.repo';
 import { stepPlannerService } from './step-planner.service';
 import { extractorService } from './extractor.service';
 import { mergerService } from './merger.service';
@@ -303,6 +304,14 @@ export class TaskManagerService {
           await vectorSearchService.indexCharacters(mergeResult.newCharacters);
           for (const char of mergeResult.updatedCharacters) {
             await vectorSearchService.indexCharacter(char.id, char);
+          }
+
+          // 创建 TextChunk 节点并生成 embedding
+          try {
+            const chunk = await textChunkRepo.create(novelId, i + 1, step.chaptersRange, stepText);
+            await vectorSearchService.indexTextChunk(chunk.id, stepText);
+          } catch (err) {
+            logger.warn({ err, novelId, step: i + 1 }, '原文段落向量化失败（非致命）');
           }
         }
 
