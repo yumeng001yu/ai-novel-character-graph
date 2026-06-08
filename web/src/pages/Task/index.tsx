@@ -355,6 +355,25 @@ const Task: React.FC = () => {
   // 正在流式输出的日志数量
   const streamingCount = aiLogs.filter(l => l.status === 'streaming').length;
 
+  // 计算构建流程大阶段
+  const buildPhase = (() => {
+    if (!taskStatus) return -1;
+    if (taskStatus.status === 'completed') return 5;
+    if (taskStatus.status === 'failed' || taskStatus.status === 'canceled') return -1;
+    if (!progress) return 0;
+    // 根据 progress.phase 映射到大阶段
+    const phase = progress.phase || '';
+    if (phase === 'extracting' || phase === 'disambiguating' || phase === 'vector_disambiguating'
+      || phase === 'merging' || phase === 'implicit_relations' || phase === 'conflict_detecting'
+      || phase === 'profile_updating' || phase === 'snapshot_saving' || phase === 'vector_indexing'
+      || phase === 'content_refused') {
+      return 2; // 逐步构建
+    }
+    if (phase === 'protagonist_detecting') return 3;
+    if (phase === 'indexing') return 4;
+    return 1; // 步划分（默认）
+  })();
+
   return (
     <div>
       <Card title="构建任务" style={{ marginBottom: 24 }}>
@@ -634,12 +653,18 @@ const Task: React.FC = () => {
       </Card>
 
       <Card title="构建流程">
-        <Steps direction="vertical" items={[
-          { title: '章节识别', description: '识别小说章节边界' },
-          { title: '步划分', description: '按Token数贪心分组' },
-          { title: '逐步构建', description: 'AI提取人物/关系/事件' },
-          { title: '主角识别', description: 'AI判定主角' },
-          { title: '搜索索引', description: '构建角色搜索索引' },
+        <Steps direction="vertical" current={buildPhase} items={[
+          { title: '章节识别', description: '识别小说章节边界', status: buildPhase > 0 ? 'finish' : buildPhase === 0 ? 'process' : 'wait' },
+          { title: '步划分', description: '按Token数贪心分组', status: buildPhase > 1 ? 'finish' : buildPhase === 1 ? 'process' : 'wait' },
+          {
+            title: '逐步构建',
+            description: progress && buildPhase === 2
+              ? `第 ${progress.stepNumber} 步 - ${phaseLabels[progress.phase] || progress.phase}`
+              : 'AI提取人物/关系/事件',
+            status: buildPhase > 2 ? 'finish' : buildPhase === 2 ? 'process' : 'wait',
+          },
+          { title: '主角识别', description: 'AI判定主角', status: buildPhase > 3 ? 'finish' : buildPhase === 3 ? 'process' : 'wait' },
+          { title: '搜索索引', description: '构建角色搜索索引', status: buildPhase === 5 ? 'finish' : buildPhase === 4 ? 'process' : 'wait' },
         ]} />
       </Card>
 
