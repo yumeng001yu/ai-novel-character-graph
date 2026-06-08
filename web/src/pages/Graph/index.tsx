@@ -181,8 +181,18 @@ const Graph: React.FC = () => {
     graph.data({ nodes, edges });
     graph.render();
 
-    // 让力导向布局多跑几轮再稳定
-    graph.fitView([40, 40]);
+    // 力导向布局稳定后：1) 自适应画布显示所有节点 2) 聚焦主角
+    graph.on('layout:end', () => {
+      graph.fitView([40, 40]);
+      // 找到第一个主角节点，聚焦到该位置
+      const protagonist = (data.nodes || []).find((n: any) => n.isProtagonist);
+      if (protagonist) {
+        const nodeItem = graph.findById(protagonist.id);
+        if (nodeItem) {
+          graph.focusItem(nodeItem, false, { easing: 'easeCubic', duration: 500 });
+        }
+      }
+    });
 
     graphRef.current = graph;
   };
