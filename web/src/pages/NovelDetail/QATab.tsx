@@ -54,72 +54,100 @@ const QATab: React.FC<Props> = ({ novelId }) => {
     setSending(true);
 
     try {
-      // 使用 SSE 流式请求
-      const eventSource = new EventSource(
-        `/novelgraph/api/graphrag/${novelId}/query?q=${encodeURIComponent(question)}`
-      );
+      // 使用 POST 请求 + 流式读取
+      const response = await fetch('/novelgraph/api/graphrag/' + novelId + '/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, stream: true }),
+      });
 
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('浏览器不支持流式读取');
+      }
+
+      const decoder = new TextDecoder();
       let fullContent = '';
       let sources: ChatMessage['sources'];
+      let sseBuffer = ''; // 缓冲区，处理跨 chunk 边界的 SSE 事件
 
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          if (data.type === 'delta' && data.content) {
-            fullContent += data.content;
-            setMessages(prev => prev.map(m =>
-              m.id === assistantMsg.id
-                ? { ...m, content: fullContent, loading: false }
-                : m
-            ));
+        sseBuffer += decoder.decode(value, { stream: true });
+        // 按双换行分割完整的 SSE 事件
+        const eventBlocks = sseBuffer.split('\n\n');
+        // 最后一个可能是不完整的事件，保留在缓冲区
+        sseBuffer = eventBlocks.pop() || '';
+
+        for (const block of eventBlocks) {
+          const lines = block.split('\n');
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6).trim();
+            if (!dataStr) continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (data.type === 'delta' && data.delta) {
+                fullContent += data.delta;
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantMsg.id
+                    ? { ...m, content: fullContent, loading: false }
+                    : m
+                ));
+              }
+
+              if (data.type === 'done') {
+                if (data.sources) {
+                  sources = {
+                    characters: data.sources
+                      .filter((s: any) => s.type === 'character')
+                      .map((s: any) => s.name),
+                    passages: data.sources
+                      .filter((s: any) => s.type === 'text_chunk')
+                      .map((s: any) => `[第${s.stepNumber}步 ${s.chapterRange}]`),
+                  };
+                }
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantMsg.id
+                    ? { ...m, content: fullContent, sources, loading: false }
+                    : m
+                ));
+              }
+
+              if (data.type === 'error') {
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantMsg.id
+                    ? { ...m, content: data.error || '请求失败', loading: false }
+                    : m
+                ));
+              }
+            } catch {
+              // 非 JSON 数据忽略
+            }
           }
-
-          if (data.type === 'sources') {
-            sources = data.sources;
-          }
-
-          if (data.type === 'done') {
-            setMessages(prev => prev.map(m =>
-              m.id === assistantMsg.id
-                ? { ...m, content: fullContent || data.fullResponse || '', sources, loading: false }
-                : m
-            ));
-            eventSource.close();
-            setSending(false);
-          }
-
-          if (data.type === 'error') {
-            setMessages(prev => prev.map(m =>
-              m.id === assistantMsg.id
-                ? { ...m, content: data.error || '请求失败', loading: false }
-                : m
-            ));
-            eventSource.close();
-            setSending(false);
-          }
-        } catch {
-          // 非 JSON 数据，作为纯文本处理
-          fullContent += event.data;
-          setMessages(prev => prev.map(m =>
-            m.id === assistantMsg.id
-              ? { ...m, content: fullContent, loading: false }
-              : m
-          ));
         }
-      };
+      }
 
-      eventSource.onerror = () => {
-        // SSE 连接失败，回退到普通 POST 请求
-        eventSource.close();
-
-        // 回退方案：使用 POST 请求
-        fallbackPostRequest(novelId, question, assistantMsg);
-      };
-    } catch (err) {
-      // 直接使用 POST 回退
-      fallbackPostRequest(novelId, question, assistantMsg);
+      // 确保最终状态更新
+      setMessages(prev => prev.map(m =>
+        m.id === assistantMsg.id
+          ? { ...m, content: fullContent || '无回答', sources, loading: false }
+          : m
+      ));
+    } catch (err: any) {
+      // 流式请求失败，回退到普通 POST
+      await fallbackPostRequest(novelId, question, assistantMsg);
+      return; // fallbackPostRequest 内部已调用 setSending(false)
     }
+    setSending(false);
   };
 
   const fallbackPostRequest = async (nid: string, question: string, assistantMsg: ChatMessage) => {

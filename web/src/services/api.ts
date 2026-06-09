@@ -88,7 +88,8 @@ export const searchKnowledgeBase = (q: string) => api.get('/knowledge-base/searc
 
 // 小说详情
 export const getNovelDetail = (id: string) => api.get(`/novels/${id}`);
-export const getNovelText = (id: string) => api.get(`/novels/${id}/text`);
+export const getNovelText = (id: string, chapter?: number) =>
+  api.get(`/novels/${id}/text`, { params: chapter !== undefined ? { chapter } : undefined });
 export const getNovelChapters = (id: string) => api.get(`/novels/${id}/chapters`);
 
 // GraphRAG

@@ -174,6 +174,62 @@ export async function novelRoutes(app: FastifyInstance) {
     }
   });
 
+  // 小说章节列表（静态路径，在动态路由之前）
+  app.get('/:id/chapters', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const novel = await novelRepo.findById(id);
+    if (!novel) return reply.status(404).send({ error: '小说未找到' });
+
+    const chapters = await chapterRepo.findByNovelId(id);
+    reply.send(chapters);
+  });
+
+  // 小说原文（静态路径，在动态路由之前）
+  // 支持 ?chapter=N 按章节索引返回对应文本，不传则返回全文
+  app.get('/:id/text', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const { chapter } = req.query as any;
+
+    const novel = await novelRepo.findById(id);
+    if (!novel) return reply.status(404).send({ error: '小说未找到' });
+
+    // 安全校验
+    if (!/^[a-f0-9-]+$/.test(id)) {
+      return reply.status(400).send({ error: '无效的小说ID' });
+    }
+
+    const filePath = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', id, 'original.txt');
+    if (!fs.existsSync(filePath)) {
+      return reply.status(404).send({ error: '原文文件不存在' });
+    }
+
+    const fullText = fs.readFileSync(filePath, 'utf-8');
+
+    // 如果指定了章节索引，只返回该章节的文本
+    if (chapter !== undefined && chapter !== null) {
+      const chapterIndex = parseInt(chapter as string);
+      if (isNaN(chapterIndex)) {
+        return reply.status(400).send({ error: '无效的章节索引' });
+      }
+
+      const chapters = await chapterRepo.findByNovelId(id);
+      const targetChapter = chapters.find(c => c.index === chapterIndex);
+      if (!targetChapter) {
+        return reply.status(404).send({ error: '章节未找到' });
+      }
+
+      // 计算章节文本范围：从当前章节 startOffset 到下一章节 startOffset
+      const startOffset = targetChapter.startOffset;
+      const nextChapter = chapters.find(c => c.index === chapterIndex + 1);
+      const endOffset = nextChapter ? nextChapter.startOffset : fullText.length;
+      const chapterText = fullText.substring(startOffset, endOffset);
+
+      reply.send({ text: chapterText, chapter: chapterIndex, title: targetChapter.title });
+    } else {
+      reply.send({ text: fullText });
+    }
+  });
+
   // 小说统计信息（静态路径，在动态路由之前）
   app.get('/:id/stats', async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as any;

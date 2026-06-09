@@ -41,9 +41,7 @@ const OriginalTextTab: React.FC<Props> = ({ novelId }) => {
   const loadText = async (chapter?: number) => {
     setLoading(true);
     try {
-      const params: any = {};
-      if (chapter !== undefined) params.chapter = chapter;
-      const res = await getNovelText(novelId);
+      const res = await getNovelText(novelId, chapter);
       setText(res.data?.text || res.data?.content || (typeof res.data === 'string' ? res.data : ''));
     } catch (err: any) {
       if (err.response?.status === 404) {
