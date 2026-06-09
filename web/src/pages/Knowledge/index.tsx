@@ -9,12 +9,10 @@ interface NovelItem {
   name: string;
   totalChars?: number;
   totalTokens?: number;
-  graphStatus?: string;
+  buildStatus?: string;
+  graphBuilt?: boolean;
   characterCount?: number;
   relationCount?: number;
-  tokenUsage?: number;
-  currentStep?: number;
-  totalSteps?: number;
 }
 
 const Knowledge: React.FC = () => {
@@ -28,7 +26,7 @@ const Knowledge: React.FC = () => {
     setLoading(true);
     try {
       const res = await getKnowledgeBase();
-      setNovels(res.data || []);
+      setNovels(res.data?.novels || []);
     } catch (err) {
       message.error('加载知识库失败');
     }
@@ -46,7 +44,7 @@ const Knowledge: React.FC = () => {
     setLoading(true);
     try {
       const res = await searchKnowledgeBase(q);
-      setNovels(res.data || []);
+      setNovels(res.data?.novels || []);
     } catch (err) {
       message.error('搜索失败');
     }
@@ -64,9 +62,10 @@ const Knowledge: React.FC = () => {
   };
 
   const getGraphStatusTag = (novel: NovelItem) => {
-    const status = novel.graphStatus;
+    const status = novel.buildStatus;
     if (status === 'completed') return <Tag color="success">已完成</Tag>;
-    if (status === 'building' || status === 'running') return <Tag color="processing">构建中</Tag>;
+    if (status === 'running') return <Tag color="processing">构建中</Tag>;
+    if (status === 'failed') return <Tag color="error">构建失败</Tag>;
     return <Tag>未构建</Tag>;
   };
 
@@ -135,11 +134,11 @@ const Knowledge: React.FC = () => {
 
                   <div style={{ fontSize: 13, color: themeToken.colorTextSecondary }}>
                     <div>总字数：{formatChars(novel.totalChars)}</div>
-                    {novel.graphStatus === 'completed' && (
+                    {novel.buildStatus === 'completed' && (
                       <>
                         <div>角色数：{novel.characterCount ?? '-'}</div>
                         <div>关系数：{novel.relationCount ?? '-'}</div>
-                        <div>Token 用量：{novel.tokenUsage?.toLocaleString() ?? '-'}</div>
+                        <div>Token 用量：{novel.totalTokens?.toLocaleString() ?? '-'}</div>
                       </>
                     )}
                   </div>
