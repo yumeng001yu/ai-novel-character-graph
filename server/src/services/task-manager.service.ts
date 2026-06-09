@@ -279,7 +279,10 @@ export class TaskManagerService {
           message: `正在更新角色档案（共${mergeResult.newCharacters.length + mergeResult.updatedCharacters.length}个角色）...`,
         });
         for (const char of mergeResult.newCharacters) {
-          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange, onStream);
+          // 新角色：用首次出场章节对应的文本构建档案
+          const charStepText = this.getCharacterStepText(char, fullText, chapters) || stepText;
+          const charChapterRange = this.getCharacterChapterRange(char, chapters) || step.chaptersRange;
+          await profileBuilderService.updateProfile(char.id, novelId, charStepText, charChapterRange, onStream);
         }
         for (const char of mergeResult.updatedCharacters) {
           await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange, onStream);
@@ -375,6 +378,48 @@ export class TaskManagerService {
     const start = parseInt(match[1]);
     const end = match[2] ? parseInt(match[2]) : start;
     return allChapters.filter(c => c.index >= start && c.index <= end);
+  }
+
+  /**
+   * 获取角色首次出场章节附近的文本（用于构建初始档案）
+   * 取首次出场章节前后各1章的文本，让 AI 有更多上下文
+   */
+  private getCharacterStepText(character: any, fullText: string, allChapters: any[]): string | null {
+    const chapterIndex = character.firstAppearChapter;
+    if (!chapterIndex || !allChapters.length) return null;
+
+    // 取首次出场章节前后各1章的范围
+    const startIdx = Math.max(1, chapterIndex - 1);
+    const endIdx = Math.min(allChapters.length, chapterIndex + 1);
+
+    const startChapter = allChapters.find(c => c.index === startIdx);
+    const endChapter = allChapters.find(c => c.index === endIdx);
+    if (!startChapter) return null;
+
+    const startOffset = startChapter.startOffset;
+    let endOffset = fullText.length;
+    const nextChapter = allChapters.find(c => c.index === endIdx + 1);
+    if (nextChapter) {
+      endOffset = nextChapter.startOffset;
+    }
+
+    const text = fullText.substring(startOffset, Math.min(endOffset, fullText.length));
+    // 限制长度，避免 token 过多
+    return text.length > 8000 ? text.substring(0, 8000) : text;
+  }
+
+  /**
+   * 获取角色首次出场章节的范围描述
+   */
+  private getCharacterChapterRange(character: any, allChapters: any[]): string | null {
+    const chapterIndex = character.firstAppearChapter;
+    if (!chapterIndex) return null;
+
+    const startIdx = Math.max(1, chapterIndex - 1);
+    const endIdx = Math.min(allChapters.length, chapterIndex + 1);
+
+    if (startIdx === endIdx) return `第${startIdx}章`;
+    return `第${startIdx}~${endIdx}章`;
   }
 
   /**

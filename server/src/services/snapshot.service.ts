@@ -85,7 +85,25 @@ export class SnapshotService {
 
     for (const file of files) {
       const step = parseInt(file.replace('snapshot_', '').replace('.json', ''));
-      const meta = await snapshotCacheRepo.getMeta(novelId, step);
+      // 优先从 Redis 缓存获取 meta，缓存不存在则从文件读取
+      let meta = await snapshotCacheRepo.getMeta(novelId, step);
+      if (!meta) {
+        try {
+          const snapshotData = await this.loadSnapshot(novelId, step);
+          if (snapshotData) {
+            meta = {
+              filePath: this.getSnapshotPath(novelId, step),
+              nodeCount: snapshotData.nodes.length,
+              edgeCount: snapshotData.edges.length,
+              createdAt: snapshotData.createdAt,
+            };
+            // 回写 Redis 缓存
+            await snapshotCacheRepo.setMeta(novelId, step, meta);
+          }
+        } catch (err) {
+          logger.warn({ err, novelId, step }, '读取快照文件失败');
+        }
+      }
       if (meta) {
         snapshots.push({ step, nodeCount: meta.nodeCount, edgeCount: meta.edgeCount, createdAt: meta.createdAt });
       }

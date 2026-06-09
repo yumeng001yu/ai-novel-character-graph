@@ -53,7 +53,12 @@ ${stepText.substring(0, 5000)}
   "inferences": [
     {"content": "推断内容", "basis": "推断依据"}
   ]
-}`;
+}
+
+特别注意：
+- newExperiences 应只包含关键事件（转折点、成长、危机），不要记录日常琐事
+- chapter 字段必须填写事件发生的章节号（数字）
+- 优先记录角色首次出场、重要决策、战斗胜负、关系变化等转折性事件`;
 
     try {
       const response = await callAIStream(
