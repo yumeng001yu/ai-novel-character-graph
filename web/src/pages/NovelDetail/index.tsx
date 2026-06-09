@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, Card, Spin, message, Button, theme } from 'antd';
-import { ArrowLeftOutlined, FileTextOutlined, ApartmentOutlined, UserOutlined, MessageOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, FileTextOutlined, ApartmentOutlined, UserOutlined } from '@ant-design/icons';
 import { getNovelDetail } from '../../services/api';
 import OriginalTextTab from './OriginalTextTab';
 import GraphTab from './GraphTab';
 import CharacterTab from './CharacterTab';
-import QATab from './QATab';
 
 const NovelDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -49,11 +48,6 @@ const NovelDetail: React.FC = () => {
       key: 'character',
       label: <span><UserOutlined /> 角色</span>,
       children: <CharacterTab novelId={id!} />,
-    },
-    {
-      key: 'qa',
-      label: <span><MessageOutlined /> 问答</span>,
-      children: <QATab novelId={id!} />,
     },
   ];
 

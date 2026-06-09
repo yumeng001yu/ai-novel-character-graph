@@ -95,5 +95,7 @@ export const getNovelChapters = (id: string) => api.get(`/novels/${id}/chapters`
 // GraphRAG
 export const queryGraphRAG = (novelId: string, question: string) =>
   api.post(`/graphrag/${novelId}/query`, { question });
+export const queryGlobalGraphRAG = (question: string) =>
+  api.post('/graphrag/query', { question });
 
 export default api;
