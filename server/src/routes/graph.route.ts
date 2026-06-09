@@ -58,6 +58,14 @@ export async function graphRoutes(app: FastifyInstance) {
         centerNode = snapshot.nodes.find((n: any) =>
           n.id === center || n.name === center || n.aliases?.includes(center)
         );
+        // 模糊匹配：名称包含搜索词
+        if (!centerNode) {
+          const lowerCenter = center.toLowerCase();
+          centerNode = snapshot.nodes.find((n: any) =>
+            n.name?.toLowerCase().includes(lowerCenter) ||
+            n.aliases?.some((a: string) => a.toLowerCase().includes(lowerCenter))
+          );
+        }
       }
       if (!centerNode) {
         // 默认使用主角
@@ -71,7 +79,7 @@ export async function graphRoutes(app: FastifyInstance) {
         const filteredEdges = snapshot.edges.filter((e: any) =>
           connectedIds.has(e.source || e.sourceId) && connectedIds.has(e.target || e.targetId)
         );
-        return reply.send({ nodes: filteredNodes, edges: filteredEdges, centerId: centerNode.id });
+        return reply.send({ nodes: filteredNodes, edges: filteredEdges, centerId: centerNode.id, centerFound: !!center });
       }
 
       return reply.send(snapshot);
@@ -87,6 +95,14 @@ export async function graphRoutes(app: FastifyInstance) {
       centerChar = characters.find(c =>
         c.id === center || c.name === center || c.aliases?.includes(center)
       );
+      // 模糊匹配：名称包含搜索词
+      if (!centerChar) {
+        const lowerCenter = center.toLowerCase();
+        centerChar = characters.find(c =>
+          c.name?.toLowerCase().includes(lowerCenter) ||
+          c.aliases?.some((a: string) => a.toLowerCase().includes(lowerCenter))
+        );
+      }
     }
     if (!centerChar) {
       // 默认使用第一个主角
@@ -100,7 +116,7 @@ export async function graphRoutes(app: FastifyInstance) {
       const filteredRels = relations.filter(r =>
         connectedIds.has(r.sourceId) && connectedIds.has(r.targetId)
       );
-      return reply.send({ nodes: filteredChars, edges: filteredRels, centerId: centerChar.id });
+      return reply.send({ nodes: filteredChars, edges: filteredRels, centerId: centerChar.id, centerFound: !!center });
     }
 
     // 没有主角也没有指定中心，返回全部（兜底）

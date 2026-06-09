@@ -13,6 +13,7 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
   const [snapshots, setSnapshots] = useState<any[]>([]);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [centerName, setCenterName] = useState<string>('');
   const [selectedChar, setSelectedChar] = useState<any>(null);
   const [charDetail, setCharDetail] = useState<any>(null);
@@ -38,17 +39,23 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
 
   const loadGraph = async (nid: string, step?: number, center?: string) => {
     if (!nid) return;
-    setLoading(true);
+    if (center) setLocating(true);
+    else setLoading(true);
     try {
       const params: any = {};
       if (step) params.step = step;
       if (center) params.center = center;
       const res = await getGraph(nid, params);
       renderGraph(res.data);
+      // 如果搜索了角色但后端返回 centerFound=false，说明角色未找到
+      if (center && !res.data.centerFound) {
+        message.warning(`未找到角色「${center}」，已显示主角图谱`);
+      }
     } catch (err) {
       message.error('加载图谱失败');
     }
     setLoading(false);
+    setLocating(false);
   };
 
   const loadSnapshots = async (nid: string) => {
@@ -170,9 +177,10 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
 
     graph.on('layout:end', () => {
       graph.fitView([40, 40]);
-      const protagonist = (data.nodes || []).find((n: any) => n.isProtagonist);
-      if (protagonist) {
-        const nodeItem = graph.findById(protagonist.id);
+      // 优先聚焦 centerId（搜索的角色），其次聚焦主角
+      const focusId = data.centerId || (data.nodes || []).find((n: any) => n.isProtagonist)?.id;
+      if (focusId) {
+        const nodeItem = graph.findById(focusId);
         if (nodeItem) {
           graph.focusItem(nodeItem, false, { easing: 'easeCubic', duration: 500 });
         }
@@ -230,7 +238,7 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
             onPressEnter={handleCenterSearch}
             allowClear
           />
-          <Button icon={<SearchOutlined />} onClick={handleCenterSearch}>定位</Button>
+          <Button icon={<SearchOutlined />} onClick={handleCenterSearch} loading={locating}>定位</Button>
           <Button icon={<RollbackOutlined />} onClick={handleRollback}>回退</Button>
           <Button icon={<ExportOutlined />} onClick={() => handleExport('json')}>导出</Button>
         </Space>
@@ -244,8 +252,25 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
             marks={Object.fromEntries(snapshots.map((s: any) => [s.step, `第${s.step}步`]))} />
         </div>
       )}
-      <Spin spinning={loading}>
-        <div ref={containerRef} className="graph-container" />
+      <Spin spinning={loading} tip="加载图谱中...">
+        <div style={{ position: 'relative' }}>
+          {locating && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+              display: 'flex', justifyContent: 'center', padding: '8px 0',
+            }}>
+              <span style={{
+                background: token.colorPrimaryBg,
+                border: `1px solid ${token.colorPrimaryBorder}`,
+                borderRadius: 6, padding: '4px 16px', fontSize: 13,
+                color: token.colorPrimary,
+              }}>
+                正在定位角色「{centerName}」...
+              </span>
+            </div>
+          )}
+          <div ref={containerRef} className="graph-container" />
+        </div>
       </Spin>
 
       {/* 角色详情弹窗 */}
