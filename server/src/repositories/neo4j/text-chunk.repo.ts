@@ -139,6 +139,20 @@ export class TextChunkRepo {
     }
   }
 
+  async findByIds(ids: string[]): Promise<TextChunk[]> {
+    if (ids.length === 0) return [];
+    const session = getSession();
+    try {
+      const result = await session.run(
+        `MATCH (t:TextChunk) WHERE t.id IN $ids RETURN t`,
+        { ids }
+      );
+      return result.records.map(r => r.get('t').properties as TextChunk);
+    } finally {
+      await session.close();
+    }
+  }
+
   async deleteByNovelId(novelId: string): Promise<void> {
     const session = getSession();
     try {

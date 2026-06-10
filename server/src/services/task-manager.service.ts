@@ -22,6 +22,7 @@ import { AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { estimateTokens, getEncodingForModel } from '../utils/token-counter';
 import { getConfig } from '../config';
+import { getSession } from '../repositories/neo4j/connection';
 import fs from 'fs';
 import path from 'path';
 
@@ -108,6 +109,9 @@ export class TaskManagerService {
       startedAt: new Date().toISOString(),
     };
     await taskQueueRepo.setTask(novelId, task);
+
+    // 清除旧构建数据（角色、关系、事件、快照、档案），防止重复构建时数据混乱
+    await this.cleanBuildData(novelId);
 
     // 异步执行构建
     this.executeBuild(novelId).catch(async err => {
@@ -312,7 +316,7 @@ export class TaskManagerService {
           // 创建 TextChunk 节点并生成 embedding
           try {
             const chunk = await textChunkRepo.create(novelId, i + 1, step.chaptersRange, stepText);
-            await vectorSearchService.indexTextChunk(chunk.id, stepText);
+            await vectorSearchService.indexTextChunk(chunk.id, stepText, novelId, i + 1, step.chaptersRange);
           } catch (err) {
             logger.warn({ err, novelId, step: i + 1 }, '原文段落向量化失败（非致命）');
           }
@@ -358,6 +362,9 @@ export class TaskManagerService {
     await searchIndexerService.buildIndex(novelId);
     await taskQueueRepo.updateLastCompletedStep(novelId, totalSteps - 1, 'indexing');
 
+    // 保存 turbovec 索引到磁盘
+    await vectorSearchService.saveIndex();
+
     // 完成
     await taskQueueRepo.updateStatus(novelId, 'completed');
     await progressRepo.setProgress(novelId, {
@@ -369,10 +376,77 @@ export class TaskManagerService {
   }
 
   /**
+   * 清除旧构建数据，防止重复构建时数据混乱
+   */
+  private async cleanBuildData(novelId: string): Promise<void> {
+    logger.info(`清除旧构建数据：${novelId}`);
+
+    // 1. 删除所有角色和关系（通过 Novel 节点级联）
+    const session = getSession();
+    try {
+      // 先删除关系（RELATES_TO）
+      await session.run(
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
+         MATCH (c)-[r:RELATES_TO]-()
+         DELETE r`,
+        { novelId }
+      );
+      // 删除事件
+      await session.run(
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
+         MATCH (c)-[:PARTICIPATED_IN]->(e:Event)
+         DETACH DELETE e`,
+        { novelId }
+      );
+      // 删除角色
+      await session.run(
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
+         DETACH DELETE c`,
+        { novelId }
+      );
+      // 删除 TextChunk
+      await session.run(
+        `MATCH (n:Novel {id: $novelId})-[:HAS_CHUNK]->(tc:TextChunk)
+         DETACH DELETE tc`,
+        { novelId }
+      );
+    } finally {
+      await session.close();
+    }
+
+    // 2. 删除文件系统数据（快照和档案）
+    const config = getConfig();
+    const snapshotDir = path.resolve(config.build.snapshot_dir, novelId);
+    if (fs.existsSync(snapshotDir)) {
+      fs.rmSync(snapshotDir, { recursive: true, force: true });
+    }
+    const profilesDir = path.resolve(config.build.snapshot_dir, '..', 'profiles', novelId);
+    if (fs.existsSync(profilesDir)) {
+      fs.rmSync(profilesDir, { recursive: true, force: true });
+    }
+
+    // 3. 清除 Redis 缓存
+    const redis = (await import('../repositories/redis/connection')).getRedis();
+    const writeLogKeys = await redis.keys(`writelog:${novelId}:*`);
+    if (writeLogKeys.length > 0) {
+      await redis.del(...writeLogKeys);
+    }
+    const snapshotKeys = await redis.keys(`snapshot:${novelId}:*`);
+    if (snapshotKeys.length > 0) {
+      await redis.del(...snapshotKeys);
+    }
+
+    // 4. 清除 turbovec 向量数据
+    await vectorSearchService.deleteByNovel(novelId);
+
+    logger.info(`旧构建数据已清除：${novelId}`);
+  }
+
+  /**
    * 根据章节范围字符串获取对应章节
    */
   private getStepChapters(chaptersRange: string, allChapters: any[]): any[] {
-    const match = chaptersRange.match(/第(\d+)[~—]*(\d*)章/);
+    const match = chaptersRange.match(/第(\d+)[~—]*(\d*)[章回]/);
     if (!match) return allChapters; // 文本粘贴模式，返回全部
 
     const start = parseInt(match[1]);
@@ -418,8 +492,21 @@ export class TaskManagerService {
     const startIdx = Math.max(1, chapterIndex - 1);
     const endIdx = Math.min(allChapters.length, chapterIndex + 1);
 
-    if (startIdx === endIdx) return `第${startIdx}章`;
-    return `第${startIdx}~${endIdx}章`;
+    // 从章节标题中检测格式（章/回）
+    const chapterUnit = this.detectChapterUnit(allChapters);
+
+    if (startIdx === endIdx) return `第${startIdx}${chapterUnit}`;
+    return `第${startIdx}~${endIdx}${chapterUnit}`;
+  }
+
+  /**
+   * 从章节标题中检测章节单位（章/回）
+   */
+  private detectChapterUnit(allChapters: any[]): string {
+    if (allChapters.length === 0) return '章';
+    const title = allChapters[0].title || '';
+    if (title.match(/第[零一二三四五六七八九十百千万\d]+回/)) return '回';
+    return '章';
   }
 
   /**

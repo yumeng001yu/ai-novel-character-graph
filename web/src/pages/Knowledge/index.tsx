@@ -179,7 +179,7 @@ const Knowledge: React.FC = () => {
                       .map((s: any) => `${s.name}（${s.novelName || '未知'}）`),
                     novels: [...new Set(data.sources
                       .filter((s: any) => s.novelName)
-                      .map((s: any) => s.novelName))],
+                      .map((s: any) => s.novelName as string))] as string[],
                     passages: data.sources
                       .filter((s: any) => s.type === 'text_chunk')
                       .map((s: any) => `【${s.novelName || '未知'}】第${s.stepNumber}步 ${s.chapterRange}`),

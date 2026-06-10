@@ -7,6 +7,7 @@ import { chapterParserService } from '../services/chapter-parser.service';
 import { semanticSegmenterService } from '../services/semantic-segmenter.service';
 import { stepPlannerService } from '../services/step-planner.service';
 import { settingsService } from '../services/settings.service';
+import { vectorSearchService } from '../services/vector-search.service';
 import { taskQueueRepo } from '../repositories/redis/task-queue.repo';
 import { progressRepo } from '../repositories/redis/progress.repo';
 import { writeLogRepo } from '../repositories/redis/write-log.repo';
@@ -142,7 +143,10 @@ export async function novelRoutes(app: FastifyInstance) {
       // 1. 删除 Neo4j 数据（DETACH DELETE 会级联删除所有关联节点和关系）
       await novelRepo.deleteById(id);
 
-      // 2. 删除 Redis 数据
+      // 2. 删除 turbovec 向量数据
+      await vectorSearchService.deleteByNovel(id);
+
+      // 3. 删除 Redis 数据
       await taskQueueRepo.deleteTask(id);
       await progressRepo.deleteProgress(id);
       // 删除写操作日志（扫描所有步的 key）
@@ -152,7 +156,7 @@ export async function novelRoutes(app: FastifyInstance) {
         await redis.del(...writeLogKeys);
       }
 
-      // 3. 删除文件系统数据
+      // 4. 删除文件系统数据
       const snapshotDir = path.resolve(getConfig().build.snapshot_dir, '..', 'novels', id);
       if (fs.existsSync(snapshotDir)) {
         fs.rmSync(snapshotDir, { recursive: true, force: true });
