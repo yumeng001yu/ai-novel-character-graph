@@ -44,6 +44,7 @@ const phaseLabels: Record<string, string> = {
   implicit_relations: '隐含关系发现',
   conflict_detecting: '冲突检测',
   profile_updating: '更新角色档案',
+  profile_enrichment: '提取关键经历',
   vector_indexing: '向量索引更新',
   snapshot_saving: '保存快照',
   protagonist_detecting: '主角识别',
@@ -59,6 +60,7 @@ const phaseColors: Record<string, string> = {
   merging: 'green',
   conflict_detecting: 'orange',
   profile_updating: 'cyan',
+  profile_enrichment: 'geekblue',
   snapshot_saving: 'default',
   protagonist_detecting: 'red',
   indexing: 'default',
@@ -359,7 +361,7 @@ const Task: React.FC = () => {
   // 计算构建流程大阶段
   const buildPhase = (() => {
     if (!taskStatus) return -1;
-    if (taskStatus.status === 'completed') return 5;
+    if (taskStatus.status === 'completed') return 6;
     if (taskStatus.status === 'failed' || taskStatus.status === 'canceled') return -1;
     if (!progress) return 0;
     // 根据 progress.phase 映射到大阶段
@@ -372,6 +374,7 @@ const Task: React.FC = () => {
     }
     if (phase === 'protagonist_detecting') return 3;
     if (phase === 'indexing') return 4;
+    if (phase === 'profile_enrichment') return 5;
     return 1; // 步划分（默认）
   })();
 
@@ -665,7 +668,14 @@ const Task: React.FC = () => {
             status: buildPhase > 2 ? 'finish' : buildPhase === 2 ? 'process' : 'wait',
           },
           { title: '主角识别', description: 'AI判定主角', status: buildPhase > 3 ? 'finish' : buildPhase === 3 ? 'process' : 'wait' },
-          { title: '搜索索引', description: '构建角色搜索索引', status: buildPhase === 5 ? 'finish' : buildPhase === 4 ? 'process' : 'wait' },
+          { title: '搜索索引', description: '构建角色搜索索引', status: buildPhase > 4 ? 'finish' : buildPhase === 4 ? 'process' : 'wait' },
+          {
+            title: '关键经历提取',
+            description: progress && buildPhase === 5
+              ? phaseLabels[progress.phase] || '提取角色关键经历'
+              : '全文分段提取角色关键经历',
+            status: buildPhase === 6 ? 'finish' : buildPhase === 5 ? 'process' : 'wait',
+          },
         ]} />
       </Card>
 

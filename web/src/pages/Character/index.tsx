@@ -98,7 +98,7 @@ const Character: React.FC = () => {
             <>
               <h4 style={{ marginTop: 16 }}>经历时间线</h4>
               <Timeline items={timeline.experienceTimeline.map((e: any) => ({
-                children: <div>第{e.chapter}章：{e.event} <Tag>{e.type}</Tag></div>,
+                children: <div>第{e.chapter}章：{e.event} <Tag color={e.importance >= 9 ? 'red' : e.importance >= 7 ? 'orange' : e.importance >= 6 ? 'blue' : 'default'}>{e.type}{e.importance ? ` ${e.importance}分` : ''}</Tag></div>,
               }))} />
             </>
           )}
