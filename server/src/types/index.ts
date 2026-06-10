@@ -69,6 +69,7 @@ export interface ExperienceEvent {
   chapter: number;
   event: string;
   type: '转折点' | '成长' | '危机' | '日常';
+  importance: number; // 1-10 评分，>=6 才视为关键经历
 }
 
 export interface PersonalAnalysis {
@@ -244,7 +245,7 @@ export interface AIStreamEvent {
 
 export interface StepProgress {
   stepNumber: number;
-  phase: 'extracting' | 'disambiguating' | 'vector_disambiguating' | 'merging' | 'implicit_relations' | 'conflict_detecting' | 'profile_updating' | 'vector_indexing' | 'snapshot_saving';
+  phase: 'extracting' | 'disambiguating' | 'vector_disambiguating' | 'merging' | 'implicit_relations' | 'conflict_detecting' | 'profile_updating' | 'profile_enrichment' | 'vector_indexing' | 'snapshot_saving';
   message: string;
   tokenUsage?: {
     input: number;

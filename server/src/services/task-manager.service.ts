@@ -365,6 +365,16 @@ export class TaskManagerService {
     // 保存 turbovec 索引到磁盘
     await vectorSearchService.saveIndex();
 
+    // 全文分段关键经历提取（Profile Enrichment）
+    if (resumeFromPhase !== 'indexing') {
+      await progressRepo.setProgress(novelId, {
+        stepNumber: totalSteps,
+        phase: 'profile_enrichment',
+        message: '正在提取角色关键经历...',
+      });
+      await profileBuilderService.enrichProfilesFromFullText(novelId, fullText, chapters, onStream);
+    }
+
     // 完成
     await taskQueueRepo.updateStatus(novelId, 'completed');
     await progressRepo.setProgress(novelId, {
