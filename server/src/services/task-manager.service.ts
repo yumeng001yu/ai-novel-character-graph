@@ -213,9 +213,10 @@ export class TaskManagerService {
           message: `正在提取第${i + 1}/${totalSteps}步的人物关系（${step.chaptersRange}）...`,
         });
 
-        // AI 提取
+        // AI 提取（传入前步图谱摘要作为上下文）
         const existingChars = (await characterRepo.findByNovelId(novelId)).map(c => c.name);
-        const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars, onStream);
+        const graphSummary = i > 0 ? await extractorService.generateGraphSummary(novelId) : undefined;
+        const extraction = await extractorService.extractFromText(stepText, step.chaptersRange, existingChars, onStream, graphSummary);
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'extracting');
 
         // 角色消歧
