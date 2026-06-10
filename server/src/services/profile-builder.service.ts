@@ -12,13 +12,12 @@ const logger = getLogger();
 
 // 关键经历评分阈值（1-10，低于此分数的经历不添加）
 const IMPORTANCE_THRESHOLD = 6;
-// 每段文本长度（字符数）
-const CHUNK_SIZE = 10000;
+// 每次AI调用最大字符数（约4000 tokens）
+const MAX_CHUNK_CHARS = 8000;
 
 export class ProfileBuilderService {
   /**
-   * 全文分段提取关键经历并重建档案（构建完成后调用）
-   * 对每个角色，将全文按 CHUNK_SIZE 分段，逐段提取带评分的关键经历
+   * 全文按章节分段提取关键经历并重建档案（构建完成后调用）
    */
   async enrichProfilesFromFullText(
     novelId: string,
@@ -29,7 +28,7 @@ export class ProfileBuilderService {
     const characters = await characterRepo.findByNovelId(novelId);
     if (characters.length === 0) return;
 
-    logger.info(`开始全文分段关键经历提取，共 ${characters.length} 个角色`);
+    logger.info(`开始全文关键经历提取，共 ${characters.length} 个角色，${chapters.length} 个章节`);
 
     // 按角色出场顺序处理，主角优先
     const sorted = [...characters].sort((a, b) => {
@@ -38,26 +37,58 @@ export class ProfileBuilderService {
       return a.firstAppearChapter - b.firstAppearChapter;
     });
 
+    // 预处理：提取每个章节的文本
+    const chapterTexts = this.splitFullTextByChapters(fullText, chapters);
+
     for (const character of sorted) {
       try {
-        await this.enrichSingleProfile(character, novelId, fullText, chapters, onStream);
+        await this.enrichSingleProfile(character, novelId, chapterTexts, onStream);
       } catch (err) {
         if (err instanceof AIContentRefusedError) continue;
         logger.error({ err, characterId: character.id, characterName: character.name }, '角色档案丰富化失败');
       }
     }
 
-    logger.info('全文分段关键经历提取完成');
+    logger.info('全文关键经历提取完成');
   }
 
   /**
-   * 对单个角色进行全文分段经历提取
+   * 将全文按章节拆分为 { chapterIndex, chapterTitle, text } 数组
+   */
+  private splitFullTextByChapters(fullText: string, chapters: any[]): Array<{ index: number; title: string; text: string }> {
+    const result: Array<{ index: number; title: string; text: string }> = [];
+
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
+      const startOffset = ch.startOffset || 0;
+      let endOffset: number;
+
+      if (i + 1 < chapters.length) {
+        endOffset = chapters[i + 1].startOffset;
+      } else {
+        endOffset = fullText.length;
+      }
+
+      const text = fullText.substring(startOffset, endOffset).trim();
+      if (text.length > 0) {
+        result.push({
+          index: ch.index,
+          title: ch.title || `第${ch.index}章`,
+          text,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 对单个角色进行全文经历提取（按章节分段）
    */
   private async enrichSingleProfile(
     character: any,
     novelId: string,
-    fullText: string,
-    chapters: any[],
+    chapterTexts: Array<{ index: number; title: string; text: string }>,
     onStream?: AIStreamCallback,
   ): Promise<void> {
     const existingProfile = this.loadProfile(novelId, character.id);
@@ -83,31 +114,26 @@ export class ProfileBuilderService {
         }).join('\n')
       : '暂无';
 
-    // 将全文分段提取关键经历
+    // 按章节提取关键经历
     const allExperiences: ExperienceEvent[] = [];
-    const totalChunks = Math.ceil(fullText.length / CHUNK_SIZE);
+    const charNames = [character.name, ...(character.aliases || [])];
 
-    for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-      const start = chunkIdx * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, fullText.length);
-      const chunkText = fullText.substring(start, end);
+    // 合并短章节：将连续的短章节合并为一个AI调用，减少API次数
+    const mergedChunks = this.mergeShortChapters(chapterTexts, charNames);
 
-      // 计算该段对应的章节范围
-      const chunkChapterRange = this.getChunkChapterRange(start, end, chapters);
-
+    for (const chunk of mergedChunks) {
       // 检查该段文本中是否提到该角色
-      const charNames = [character.name, ...character.aliases];
-      const mentioned = charNames.some(name => chunkText.includes(name));
-      if (!mentioned) continue; // 该段未提及此角色，跳过
+      const mentioned = charNames.some(name => chunk.text.includes(name));
+      if (!mentioned) continue;
 
       try {
         const experiences = await this.extractExperiencesFromChunk(
-          character, chunkText, chunkChapterRange, onStream,
+          character, chunk.text, chunk.chapterRange, onStream,
         );
         allExperiences.push(...experiences);
       } catch (err) {
         if (err instanceof AIContentRefusedError) continue;
-        logger.warn({ err, characterId: character.id, chunkIdx }, '分段经历提取失败（非致命）');
+        logger.warn({ err, characterId: character.id, chapterRange: chunk.chapterRange }, '分段经历提取失败（非致命）');
       }
     }
 
@@ -163,6 +189,57 @@ export class ProfileBuilderService {
   }
 
   /**
+   * 合并短章节：将连续的短章节合并为一个chunk，直到超过 MAX_CHUNK_CHARS
+   * 只合并包含目标角色的章节
+   */
+  private mergeShortChapters(
+    chapterTexts: Array<{ index: number; title: string; text: string }>,
+    charNames: string[],
+  ): Array<{ chapterRange: string; text: string }> {
+    const result: Array<{ chapterRange: string; text: string }> = [];
+    let currentText = '';
+    let currentStartIdx: number | null = null;
+    let currentEndIdx: number | null = null;
+
+    const flush = () => {
+      if (currentText.length > 0 && currentStartIdx !== null) {
+        const range = currentStartIdx === currentEndIdx
+          ? `第${currentStartIdx}章`
+          : `第${currentStartIdx}~${currentEndIdx}章`;
+        result.push({ chapterRange: range, text: currentText });
+      }
+      currentText = '';
+      currentStartIdx = null;
+      currentEndIdx = null;
+    };
+
+    for (const ch of chapterTexts) {
+      const mentioned = charNames.some(name => ch.text.includes(name));
+
+      if (!mentioned) {
+        // 该章节未提及角色，如果当前有累积文本则先输出
+        flush();
+        continue;
+      }
+
+      // 如果加入此章节会超过限制，先输出当前累积
+      if (currentText.length + ch.text.length > MAX_CHUNK_CHARS && currentText.length > 0) {
+        flush();
+      }
+
+      // 累积章节文本
+      if (currentStartIdx === null) {
+        currentStartIdx = ch.index;
+      }
+      currentEndIdx = ch.index;
+      currentText += (currentText ? '\n' : '') + ch.text;
+    }
+
+    flush();
+    return result;
+  }
+
+  /**
    * 从文本段中提取带评分的关键经历
    */
   private async extractExperiencesFromChunk(
@@ -176,7 +253,7 @@ export class ProfileBuilderService {
 角色信息：${character.name}（${character.identity || '身份未知'}）
 
 文本（${chapterRange}）：
-${chunkText.substring(0, 8000)}
+${chunkText.substring(0, MAX_CHUNK_CHARS)}
 
 请返回JSON格式的经历列表：
 {
@@ -200,7 +277,7 @@ ${chunkText.substring(0, 8000)}
 注意：
 - 只提取该角色直接参与或被直接提及的事件
 - 如果该段文本中该角色没有重要经历，返回空数组
-- chapter 必须是事件发生的章节号
+- chapter 必须是事件发生的章节号（文本标注为${chapterRange}）
 - 事件描述要简洁，不要超过20字`;
 
     try {
@@ -309,7 +386,6 @@ ${relationsSummary}
     const grouped = new Map<string, ExperienceEvent>();
 
     for (const exp of experiences) {
-      // 用章节+事件前10字作为去重key
       const key = `${exp.chapter}:${exp.event.substring(0, 10)}`;
       const existing = grouped.get(key);
       if (!existing || exp.importance > existing.importance) {
@@ -321,21 +397,8 @@ ${relationsSummary}
   }
 
   /**
-   * 计算文本段对应的章节范围
-   */
-  private getChunkChapterRange(start: number, end: number, chapters: any[]): string {
-    if (!chapters.length) return '未知章节';
-
-    const startChapter = chapters.find(c => c.startOffset >= start) || chapters[chapters.length - 1];
-    const endChapter = chapters.slice().reverse().find(c => c.startOffset <= end) || chapters[0];
-
-    if (!startChapter || !endChapter) return '未知章节';
-    if (startChapter.index === endChapter.index) return `第${startChapter.index}章`;
-    return `第${startChapter.index}~${endChapter.index}章`;
-  }
-
-  /**
    * 更新角色档案（构建过程中调用，简单版本）
+   * 构建过程中只创建基础档案，详细经历由 enrichProfilesFromFullText 在构建完成后补充
    */
   async updateProfile(
     characterId: string,
