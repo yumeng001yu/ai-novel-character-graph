@@ -98,4 +98,8 @@ export const queryGraphRAG = (novelId: string, question: string) =>
 export const queryGlobalGraphRAG = (question: string) =>
   api.post('/graphrag/query', { question });
 
+// 角色对话
+export const getNovelCharacters = (novelId: string) =>
+  api.get(`/character-chat/characters/${novelId}`);
+
 export default api;

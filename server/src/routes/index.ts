@@ -9,6 +9,7 @@ import { settingsRoutes } from './settings.route';
 import { exportRoutes } from './export.route';
 import { graphragRoutes } from './graphrag.route';
 import { knowledgeBaseRoutes } from './knowledge-base.route';
+import { characterChatRoutes } from './character-chat.route';
 
 export function registerRoutes(app: FastifyInstance): void {
   // 健康检查（轻量，不查数据库）
@@ -34,4 +35,7 @@ export function registerRoutes(app: FastifyInstance): void {
 
   // 知识库路由
   app.register(knowledgeBaseRoutes, { prefix: '/api/knowledge-base' });
+
+  // 角色对话路由
+  app.register(characterChatRoutes, { prefix: '/api/character-chat' });
 }
