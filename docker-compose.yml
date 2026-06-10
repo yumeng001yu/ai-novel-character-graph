@@ -34,6 +34,22 @@ services:
       retries: 3
     restart: unless-stopped
 
+  turbovec:
+    build:
+      context: ./turbovec-service
+      dockerfile: Dockerfile
+    ports:
+      - "8900:8900"
+    volumes:
+      - turbovec_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8900/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   server:
     build:
       context: ./server
@@ -42,6 +58,7 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
+      - TURBOVEC_URL=http://turbovec:8900
     volumes:
       - ./server/config.yaml:/app/config.yaml
       - config_data:/app/config
@@ -51,6 +68,8 @@ services:
       neo4j:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      turbovec:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
@@ -81,3 +100,4 @@ volumes:
   neo4j_logs:
   redis_data:
   config_data:
+  turbovec_data:
