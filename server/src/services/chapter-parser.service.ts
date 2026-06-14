@@ -6,6 +6,8 @@ import { v4 as uuid } from 'uuid';
 const logger = getLogger();
 
 const CHAPTER_PATTERNS = [
+  /^第[零一二三四五六七八九十百千万\d]+回\s*.+/m,
+  /^第\d+回\s*.+/m,
   /^第[零一二三四五六七八九十百千万\d]+章\s*.+/m,
   /^第\d+章\s*.+/m,
   /^Chapter\s+\d+.*/im,

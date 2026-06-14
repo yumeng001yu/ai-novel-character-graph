@@ -29,18 +29,42 @@ export class ExporterService {
   }
 
   private exportJson(characters: Character[], relations: Relation[], events: Event[]): string {
-    return JSON.stringify({ characters, relations, events }, null, 2);
+    return JSON.stringify({
+      characters: characters.map(c => ({
+        ...c,
+        profile: (c as any).profile || undefined,
+        keyTraits: (c as any).keyTraits || undefined,
+      })),
+      relations: relations.map(r => ({
+        ...r,
+        confidence: r.confidence,
+        importance: r.importance,
+      })),
+      events,
+    }, null, 2);
   }
 
   private exportGraphML(characters: Character[], relations: Relation[]): string {
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
     xml += '<graphml xmlns="http://graphml.graphstruct.org/graphml">\n';
+    xml += '  <key id="name" for="node" attr.name="name" attr.type="string"/>\n';
+    xml += '  <key id="faction" for="node" attr.name="faction" attr.type="string"/>\n';
+    xml += '  <key id="identity" for="node" attr.name="identity" attr.type="string"/>\n';
+    xml += '  <key id="profile" for="node" attr.name="profile" attr.type="string"/>\n';
+    xml += '  <key id="keyTraits" for="node" attr.name="keyTraits" attr.type="string"/>\n';
+    xml += '  <key id="relationType" for="edge" attr.name="relationType" attr.type="string"/>\n';
+    xml += '  <key id="strength" for="edge" attr.name="strength" attr.type="double"/>\n';
+    xml += '  <key id="confidence" for="edge" attr.name="confidence" attr.type="double"/>\n';
+    xml += '  <key id="importance" for="edge" attr.name="importance" attr.type="int"/>\n';
     xml += '  <graph id="G" edgedefault="undirected">\n';
 
     for (const c of characters) {
       xml += `    <node id="${c.id}">\n`;
       xml += `      <data key="name">${this.escapeXml(c.name)}</data>\n`;
       xml += `      <data key="faction">${this.escapeXml(c.faction || '')}</data>\n`;
+      xml += `      <data key="identity">${this.escapeXml(c.identity || '')}</data>\n`;
+      xml += `      <data key="profile">${this.escapeXml((c as any).profile || '')}</data>\n`;
+      xml += `      <data key="keyTraits">${this.escapeXml(((c as any).keyTraits || []).join(';'))}</data>\n`;
       xml += `    </node>\n`;
     }
 
@@ -48,6 +72,8 @@ export class ExporterService {
       xml += `    <edge source="${r.sourceId}" target="${r.targetId}">\n`;
       xml += `      <data key="relationType">${this.escapeXml(r.relationType)}</data>\n`;
       xml += `      <data key="strength">${r.strength}</data>\n`;
+      xml += `      <data key="confidence">${r.confidence ?? ''}</data>\n`;
+      xml += `      <data key="importance">${r.importance ?? ''}</data>\n`;
       xml += `    </edge>\n`;
     }
 
@@ -61,12 +87,24 @@ export class ExporterService {
     xml += '  <graph mode="static" defaultedgetype="undirected">\n';
     xml += '    <attributes class="node">\n';
     xml += '      <attribute id="0" title="faction" type="string"/>\n';
+    xml += '      <attribute id="1" title="identity" type="string"/>\n';
+    xml += '      <attribute id="2" title="profile" type="string"/>\n';
+    xml += '      <attribute id="3" title="keyTraits" type="string"/>\n';
+    xml += '    </attributes>\n';
+    xml += '    <attributes class="edge">\n';
+    xml += '      <attribute id="4" title="confidence" type="float"/>\n';
+    xml += '      <attribute id="5" title="importance" type="integer"/>\n';
     xml += '    </attributes>\n';
     xml += '    <nodes>\n';
 
     for (const c of characters) {
       xml += `      <node id="${c.id}" label="${this.escapeXml(c.name)}">\n`;
-      xml += `        <attvalues><attvalue for="0" value="${this.escapeXml(c.faction || '')}"/></attvalues>\n`;
+      xml += `        <attvalues>\n`;
+      xml += `          <attvalue for="0" value="${this.escapeXml(c.faction || '')}"/>\n`;
+      xml += `          <attvalue for="1" value="${this.escapeXml(c.identity || '')}"/>\n`;
+      xml += `          <attvalue for="2" value="${this.escapeXml((c as any).profile || '')}"/>\n`;
+      xml += `          <attvalue for="3" value="${this.escapeXml(((c as any).keyTraits || []).join(';'))}"/>\n`;
+      xml += `        </attvalues>\n`;
       xml += `      </node>\n`;
     }
 
@@ -74,7 +112,12 @@ export class ExporterService {
 
     for (let i = 0; i < relations.length; i++) {
       const r = relations[i];
-      xml += `      <edge id="${i}" source="${r.sourceId}" target="${r.targetId}" label="${this.escapeXml(r.relationType)}" weight="${r.strength}"/>\n`;
+      xml += `      <edge id="${i}" source="${r.sourceId}" target="${r.targetId}" label="${this.escapeXml(r.relationType)}" weight="${r.strength}">\n`;
+      xml += `        <attvalues>\n`;
+      xml += `          <attvalue for="4" value="${r.confidence ?? ''}"/>\n`;
+      xml += `          <attvalue for="5" value="${r.importance ?? ''}"/>\n`;
+      xml += `        </attvalues>\n`;
+      xml += `      </edge>\n`;
     }
 
     xml += '    </edges>\n  </graph>\n</gexf>';
@@ -83,14 +126,16 @@ export class ExporterService {
 
   private exportCSV(characters: Character[], relations: Relation[]): string {
     // 节点表
-    let csv = 'id,name,aliases,gender,faction,identity,firstAppearChapter,isProtagonist\n';
+    let csv = 'id,name,aliases,gender,faction,identity,firstAppearChapter,isProtagonist,profile,keyTraits\n';
     for (const c of characters) {
-      csv += `${c.id},"${c.name}","${c.aliases.join(';')}","${c.gender || ''}","${c.faction || ''}","${c.identity || ''}",${c.firstAppearChapter},${c.isProtagonist}\n`;
+      const profile = ((c as any).profile || '').replace(/"/g, '""');
+      const keyTraits = ((c as any).keyTraits || []).join(';').replace(/"/g, '""');
+      csv += `${c.id},"${c.name}","${c.aliases.join(';')}","${c.gender || ''}","${c.faction || ''}","${c.identity || ''}",${c.firstAppearChapter},${c.isProtagonist},"${profile}","${keyTraits}"\n`;
     }
 
-    csv += '\n\nsourceId,targetId,relationType,sinceChapter,untilChapter,strength,isInference,description\n';
+    csv += '\n\nsourceId,targetId,relationType,sinceChapter,untilChapter,strength,confidence,importance,isInference,description\n';
     for (const r of relations) {
-      csv += `${r.sourceId},${r.targetId},"${r.relationType}",${r.sinceChapter},${r.untilChapter || ''},${r.strength},${r.isInference},"${(r.description || '').replace(/"/g, '""')}"\n`;
+      csv += `${r.sourceId},${r.targetId},"${r.relationType}",${r.sinceChapter},${r.untilChapter || ''},${r.strength},${r.confidence ?? ''},${r.importance ?? ''},${r.isInference},"${(r.description || '').replace(/"/g, '""')}"\n`;
     }
 
     return csv;

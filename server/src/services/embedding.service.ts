@@ -6,6 +6,17 @@ import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
 
+/** 获取代理配置 */
+function getProxyAgent(): any {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    return new HttpsProxyAgent(proxyUrl);
+  }
+  return undefined;
+}
+
 const EMBEDDING_SETTINGS_KEY = 'embedding-settings';
 
 function getEmbeddingSettingsPath(): string {
@@ -102,7 +113,8 @@ export class EmbeddingService {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 30000,
+        timeout: 60000,
+        httpsAgent: getProxyAgent(),
       }
     );
 
@@ -134,6 +146,7 @@ export class EmbeddingService {
           'Content-Type': 'application/json',
         },
         timeout: 60000,
+        httpsAgent: getProxyAgent(),
       }
     );
 
@@ -160,6 +173,7 @@ export class EmbeddingService {
             'Content-Type': 'application/json',
           },
           timeout: 15000,
+          httpsAgent: getProxyAgent(),
         }
       );
       const dim = response.data.data[0].embedding.length;
@@ -178,6 +192,7 @@ export class EmbeddingService {
       const response = await axios.get(`${url}/models`, {
         headers: { 'Authorization': `Bearer ${apiKey}` },
         timeout: 10000,
+        httpsAgent: getProxyAgent(),
       });
       return (response.data.data || [])
         .filter((m: any) => {

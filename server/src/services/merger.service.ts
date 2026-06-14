@@ -103,6 +103,8 @@ export class MergerService {
         sinceChapter: chapterNumber,
         untilChapter: null,
         strength: 0.5,
+        confidence: this.calculateConfidence(relData),
+        importance: this.calculateImportance(relData),
         isInference: relData.isInference,
         inferenceBasis: relData.inferenceBasis,
         description: relData.description,
@@ -146,6 +148,46 @@ export class MergerService {
 
     logger.info(`合并完成：新增 ${newCharacters.length} 角色，${newRelations.length} 关系，${newEvents.length} 事件`);
     return { newCharacters, updatedCharacters, newRelations, newEvents, writeLog };
+  }
+
+  /**
+   * 计算关系置信度
+   * 优先使用 AI 返回的 confidence，否则基于 isInference 推断
+   */
+  private calculateConfidence(relData: any): number {
+    // 如果 AI 已经返回了 confidence，直接使用
+    if (typeof relData.confidence === 'number') {
+      return Math.min(1, Math.max(0, relData.confidence));
+    }
+
+    // 否则基于 isInference 推断
+    if (relData.isInference) {
+      return 0.6; // 推断关系默认中等置信度
+    }
+
+    return 0.85; // 非推断关系默认高置信度
+  }
+
+  /**
+   * 计算关系重要性
+   * 优先使用 AI 返回的 importance，否则基于关系类型推断
+   */
+  private calculateImportance(relData: any): number {
+    // 如果 AI 已经返回了 importance，直接使用
+    if (typeof relData.importance === 'number') {
+      return Math.min(10, Math.max(1, Math.round(relData.importance)));
+    }
+
+    // 否则基于关系类型推断
+    const type = relData.relationType || '';
+    const coreTypes = ['父子', '父女', '母子', '母女', '夫妻', '兄弟', '姐妹'];
+    const importantTypes = ['师徒', '主仆', '结义', '恋人', '表兄妹'];
+
+    if (coreTypes.some(t => type.includes(t))) return 9;
+    if (importantTypes.some(t => type.includes(t))) return 7;
+    if (type.includes('友') || type.includes('同')) return 5;
+    if (type.includes('敌') || type.includes('对')) return 6;
+    return 4; // 默认中等重要性
   }
 }
 

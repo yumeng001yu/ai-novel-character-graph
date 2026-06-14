@@ -41,12 +41,45 @@ function findConnectedComponent(
   return visited;
 }
 
-export async function graphRoutes(app: FastifyInstance) {
-  // 获取图谱
-  app.get('/:id/graph', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { id } = req.params as any;
-    const { center, step } = req.query as any;
+/**
+ * 将角色数据精简为图谱节点所需的字段（排除 profile/keyTraits/embedding 等大字段）
+ */
+function toGraphNode(c: any) {
+  return {
+    id: c.id,
+    name: c.name,
+    aliases: c.aliases,
+    gender: c.gender,
+    faction: c.faction,
+    identity: c.identity,
+    isProtagonist: c.isProtagonist,
+    firstAppearChapter: c.firstAppearChapter,
+  };
+}
 
+/**
+ * 将关系数据精简为图谱边所需的字段
+ */
+function toGraphEdge(r: any) {
+  return {
+    source: r.sourceId || r.source,
+    target: r.targetId || r.target,
+    sourceName: r.sourceName,
+    targetName: r.targetName,
+    relationType: r.relationType,
+    sinceChapter: r.sinceChapter,
+    untilChapter: r.untilChapter,
+    strength: r.strength,
+    confidence: r.confidence,
+    importance: r.importance,
+    isInference: r.isInference,
+    description: r.description,
+  };
+}
+
+export async function graphRoutes(app: FastifyInstance) {
+  // 获取图谱（核心逻辑，同时支持 GET 和 POST）
+  const handleGetGraph = async (id: string, center: string | undefined, step: string | undefined, reply: FastifyReply) => {
     if (step) {
       // 获取指定步的快照
       const snapshot = await snapshotService.loadSnapshot(id, parseInt(step));
@@ -116,10 +149,30 @@ export async function graphRoutes(app: FastifyInstance) {
       const filteredRels = relations.filter(r =>
         connectedIds.has(r.sourceId) && connectedIds.has(r.targetId)
       );
-      return reply.send({ nodes: filteredChars, edges: filteredRels, centerId: centerChar.id, centerFound: !!center });
+      return reply.send({
+        nodes: filteredChars.map(toGraphNode),
+        edges: filteredRels.map(toGraphEdge),
+        centerId: centerChar.id,
+        centerFound: !!center,
+      });
     }
 
     // 没有主角也没有指定中心，返回全部（兜底）
-    reply.send({ nodes: characters, edges: relations });
+    reply.send({
+      nodes: characters.map(toGraphNode),
+      edges: relations.map(toGraphEdge),
+    });
+  };
+
+  app.get('/:id/graph', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const { center, step } = req.query as any;
+    await handleGetGraph(id, center, step, reply);
+  });
+
+  app.post('/:id/graph', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const { center, step } = req.body as any;
+    await handleGetGraph(id, center, step ? String(step) : undefined, reply);
   });
 }

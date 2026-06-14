@@ -3,6 +3,7 @@ import { novelRepo } from '../repositories/neo4j/novel.repo';
 import { chapterRepo } from '../repositories/neo4j/chapter.repo';
 import { characterRepo } from '../repositories/neo4j/character.repo';
 import { relationRepo } from '../repositories/neo4j/relation.repo';
+import { eventRepo } from '../repositories/neo4j/event.repo';
 import { chapterParserService } from '../services/chapter-parser.service';
 import { semanticSegmenterService } from '../services/semantic-segmenter.service';
 import { stepPlannerService } from '../services/step-planner.service';
@@ -234,6 +235,16 @@ export async function novelRoutes(app: FastifyInstance) {
     }
   });
 
+  // 事件列表（静态路径，在动态路由之前）
+  app.get('/:id/events', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as any;
+    const novel = await novelRepo.findById(id);
+    if (!novel) return reply.status(404).send({ error: '小说未找到' });
+
+    const events = await eventRepo.findByNovelId(id);
+    reply.send(events);
+  });
+
   // 小说统计信息（静态路径，在动态路由之前）
   app.get('/:id/stats', async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as any;
@@ -242,14 +253,93 @@ export async function novelRoutes(app: FastifyInstance) {
 
     const characters = await characterRepo.findByNovelId(id);
     const relations = await relationRepo.findByNovelId(id);
+    const events = await eventRepo.findByNovelId(id);
     const task = await taskQueueRepo.getTask(id);
 
+    // 角色统计
+    const protagonistCount = characters.filter(c => c.isProtagonist).length;
+    const factionDistribution: Record<string, number> = {};
+    const genderDistribution: Record<string, number> = {};
+    for (const c of characters) {
+      if (c.faction) factionDistribution[c.faction] = (factionDistribution[c.faction] || 0) + 1;
+      if (c.gender) genderDistribution[c.gender] = (genderDistribution[c.gender] || 0) + 1;
+    }
+
+    // 关系统计
+    const relationTypeDistribution: Record<string, number> = {};
+    let totalConfidence = 0;
+    let totalImportance = 0;
+    let confidenceCount = 0;
+    let importanceCount = 0;
+    const confidenceDistribution = { high: 0, medium: 0, low: 0 };
+    const importanceDistribution = { critical: 0, important: 0, normal: 0 };
+    let inferenceCount = 0;
+
+    for (const r of relations) {
+      relationTypeDistribution[r.relationType] = (relationTypeDistribution[r.relationType] || 0) + 1;
+      if (r.confidence != null) {
+        totalConfidence += r.confidence;
+        confidenceCount++;
+        if (r.confidence > 0.9) confidenceDistribution.high++;
+        else if (r.confidence >= 0.7) confidenceDistribution.medium++;
+        else confidenceDistribution.low++;
+      }
+      if (r.importance != null) {
+        totalImportance += r.importance;
+        importanceCount++;
+        if (r.importance >= 8) importanceDistribution.critical++;
+        else if (r.importance >= 5) importanceDistribution.important++;
+        else importanceDistribution.normal++;
+      }
+      if (r.isInference) inferenceCount++;
+    }
+
+    // Top 关系类型
+    const topRelationTypes = Object.entries(relationTypeDistribution)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([type, count]) => ({ type, count }));
+
+    // 度中心性 Top 角色
+    const degreeMap: Record<string, number> = {};
+    for (const r of relations) {
+      degreeMap[r.sourceId] = (degreeMap[r.sourceId] || 0) + 1;
+      degreeMap[r.targetId] = (degreeMap[r.targetId] || 0) + 1;
+    }
+    const topConnectedCharacters = Object.entries(degreeMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([charId, degree]) => {
+        const char = characters.find(c => c.id === charId);
+        return { id: charId, name: char?.name || '未知', degree };
+      });
+
     reply.send({
-      graphBuilt: characters.length > 0,
-      totalTokens: novel.totalTokens,
-      characterCount: characters.length,
-      relationCount: relations.length,
-      buildStatus: task?.status || 'pending',
+      overview: {
+        graphBuilt: characters.length > 0,
+        totalTokens: novel.totalTokens,
+        characterCount: characters.length,
+        relationCount: relations.length,
+        eventCount: events.length,
+        protagonistCount,
+        inferenceRelationCount: inferenceCount,
+        buildStatus: task?.status || 'pending',
+      },
+      characterStats: {
+        factionDistribution,
+        genderDistribution,
+      },
+      relationStats: {
+        relationTypeDistribution,
+        topRelationTypes,
+        avgConfidence: confidenceCount > 0 ? totalConfidence / confidenceCount : null,
+        avgImportance: importanceCount > 0 ? totalImportance / importanceCount : null,
+        confidenceDistribution,
+        importanceDistribution,
+      },
+      centrality: {
+        topConnectedCharacters,
+      },
     });
   });
 

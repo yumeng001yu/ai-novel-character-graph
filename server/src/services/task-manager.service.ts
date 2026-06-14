@@ -18,6 +18,7 @@ import { rollbackService } from './rollback.service';
 import { settingsService } from './settings.service';
 import { embeddingService } from './embedding.service';
 import { vectorSearchService } from './vector-search.service';
+import { chapterParserService } from './chapter-parser.service';
 import { AIStreamCallback } from './ai-client.service';
 import { getLogger } from '../utils/logger';
 import { estimateTokens, getEncodingForModel } from '../utils/token-counter';
@@ -88,8 +89,8 @@ export class TaskManagerService {
       throw new Error('小说原文文件不存在，请重新上传');
     }
 
-    // 如果之前失败的任务，支持断点续建
-    if (existing && existing.status === 'failed' && existing.lastCompletedStep !== undefined) {
+    // 如果之前失败或中断的任务，支持断点续建
+    if (existing && (existing.status === 'failed' || existing.status === 'interrupted') && existing.lastCompletedStep !== undefined) {
       // 重置状态为 running，从断点继续
       await taskQueueRepo.updateStatus(novelId, 'running');
       this.executeBuild(novelId, existing.lastCompletedStep, existing.lastCompletedPhase).catch(async err => {
@@ -138,17 +139,36 @@ export class TaskManagerService {
     // 获取章节
     let chapters = await chapterRepo.findByNovelId(novelId);
 
-    // 如果没有章节（文本粘贴模式），创建虚拟章节
+    // 如果没有章节（文本粘贴模式），尝试解析章节
     if (chapters.length === 0) {
-      chapters = [{
-        id: 'virtual',
-        index: 1,
-        title: '全文',
-        startOffset: 0,
-        charCount: fullText.replace(/\s/g, '').length,
-        tokenCount: estimateTokens(fullText, encoding),
-        novelId,
-      }];
+      const parsed = await chapterParserService.parseChapters(fullText, novelId);
+      if (parsed.length > 1) {
+        // 解析成功，批量创建 Chapter 节点
+        const chaptersToCreate = parsed.map(ch => ({
+          ...ch,
+          novelId,
+          tokenCount: estimateTokens(
+            fullText.substring(ch.startOffset, ch.startOffset + ch.charCount),
+            encoding,
+          ),
+        }));
+        await chapterRepo.createBatch(chaptersToCreate);
+        chapters = await chapterRepo.findByNovelId(novelId);
+        logger.info(`文本粘贴模式解析出 ${chapters.length} 个章节`);
+      }
+
+      // 如果仍然没有章节，创建虚拟章节
+      if (chapters.length === 0) {
+        chapters = [{
+          id: 'virtual',
+          index: 1,
+          title: '全文',
+          startOffset: 0,
+          charCount: fullText.replace(/\s/g, '').length,
+          tokenCount: estimateTokens(fullText, encoding),
+          novelId,
+        }];
+      }
     }
 
     // 步划分
@@ -236,10 +256,17 @@ export class TaskManagerService {
             message: '正在通过向量相似度增强角色消歧...',
           });
           const allChars = await characterRepo.findByNovelId(novelId);
-          for (const char of allChars) {
-            const similar = await vectorSearchService.findSimilarCharacters(novelId, char, 0.85);
-            if (similar.length > 0) {
-              logger.info(`向量消歧发现：${char.name} 与 ${similar.map(s => s.name).join(', ')} 相似度较高`);
+          // 并行执行向量消歧，限制并发数
+          const batchSize = 5;
+          for (let j = 0; j < allChars.length; j += batchSize) {
+            const batch = allChars.slice(j, j + batchSize);
+            const results = await Promise.all(
+              batch.map(char => vectorSearchService.findSimilarCharacters(novelId, char, 0.85))
+            );
+            for (let k = 0; k < results.length; k++) {
+              if (results[k].length > 0) {
+                logger.info(`向量消歧发现：${batch[k].name} 与 ${results[k].map(s => s.name).join(', ')} 相似度较高`);
+              }
             }
           }
         }
@@ -277,21 +304,8 @@ export class TaskManagerService {
           }
         }
 
-        // 更新角色档案
-        await progressRepo.setProgress(novelId, {
-          stepNumber: i + 1,
-          phase: 'profile_updating',
-          message: `正在更新角色档案（共${mergeResult.newCharacters.length + mergeResult.updatedCharacters.length}个角色）...`,
-        });
-        for (const char of mergeResult.newCharacters) {
-          // 新角色：用首次出场章节对应的文本构建档案
-          const charStepText = this.getCharacterStepText(char, fullText, chapters) || stepText;
-          const charChapterRange = this.getCharacterChapterRange(char, chapters) || step.chaptersRange;
-          await profileBuilderService.updateProfile(char.id, novelId, charStepText, charChapterRange, onStream, true);
-        }
-        for (const char of mergeResult.updatedCharacters) {
-          await profileBuilderService.updateProfile(char.id, novelId, stepText, step.chaptersRange, onStream, false);
-        }
+        // 更新角色档案（构建过程中只创建基础档案，跳过 AI 调用）
+        // 详细经历由 enrichProfilesFromFullText 在构建完成后统一提取
         await taskQueueRepo.updateLastCompletedStep(novelId, i, 'profile_updating');
 
         // 保存快照
@@ -309,15 +323,39 @@ export class TaskManagerService {
             phase: 'vector_indexing',
             message: '正在更新向量索引...',
           });
-          await vectorSearchService.indexCharacters(mergeResult.newCharacters);
-          for (const char of mergeResult.updatedCharacters) {
-            await vectorSearchService.indexCharacter(char.id, char);
+          // 批量索引新角色
+          if (mergeResult.newCharacters.length > 0) {
+            await vectorSearchService.indexCharacters(mergeResult.newCharacters);
+          }
+          // 批量索引更新角色
+          if (mergeResult.updatedCharacters.length > 0) {
+            await Promise.all(
+              mergeResult.updatedCharacters.map(char => vectorSearchService.indexCharacter(char.id, char))
+            );
           }
 
-          // 创建 TextChunk 节点并生成 embedding
+          // 创建 TextChunk 节点并生成 embedding（按章节分段存储，提高向量召回精度）
           try {
-            const chunk = await textChunkRepo.create(novelId, i + 1, step.chaptersRange, stepText);
-            await vectorSearchService.indexTextChunk(chunk.id, stepText, novelId, i + 1, step.chaptersRange);
+            const stepChaptersList = this.getStepChapters(step.chaptersRange, chapters);
+            const chapterTexts = this.splitFullTextByChaptersInternal(fullText, chapters);
+
+            // 先批量创建 TextChunk 节点
+            const createdChunks: Array<{ id: string; text: string; novelId: string; stepNumber: number; chapterRange: string }> = [];
+            for (const ch of stepChaptersList) {
+              const ct = chapterTexts.find(c => c.index === ch.index);
+              if (!ct || !ct.text) continue;
+              try {
+                const chunk = await textChunkRepo.create(novelId, i + 1, ct.title, ct.text);
+                createdChunks.push({ id: chunk.id, text: ct.text, novelId, stepNumber: i + 1, chapterRange: ct.title });
+              } catch (err) {
+                logger.warn({ err, chapter: ct.title }, '创建 TextChunk 失败（非致命）');
+              }
+            }
+
+            // 批量生成 embedding 并索引（一次 API 调用替代 N 次）
+            if (createdChunks.length > 0) {
+              await vectorSearchService.indexTextChunks(createdChunks);
+            }
           } catch (err) {
             logger.warn({ err, novelId, step: i + 1 }, '原文段落向量化失败（非致命）');
           }
@@ -402,10 +440,15 @@ export class TaskManagerService {
          DELETE r`,
         { novelId }
       );
-      // 删除事件
+      // 删除事件（通过 HAS_EVENT 关系）
       await session.run(
-        `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
-         MATCH (c)-[:PARTICIPATED_IN]->(e:Event)
+        `MATCH (n:Novel {id: $novelId})-[:HAS_EVENT]->(e:Event)
+         DETACH DELETE e`,
+        { novelId }
+      );
+      // 删除孤立事件（没有 HAS_EVENT 关系但有 novelId 属性的）
+      await session.run(
+        `MATCH (e:Event) WHERE e.novelId = $novelId AND NOT (e)<-[:HAS_EVENT]-()
          DETACH DELETE e`,
         { novelId }
       );
@@ -463,6 +506,32 @@ export class TaskManagerService {
     const start = parseInt(match[1]);
     const end = match[2] ? parseInt(match[2]) : start;
     return allChapters.filter(c => c.index >= start && c.index <= end);
+  }
+
+  /**
+   * 将全文按章节分段（用于 TextChunk 分段存储）
+   */
+  private splitFullTextByChaptersInternal(fullText: string, chapters: any[]): Array<{ index: number; title: string; text: string }> {
+    const result: Array<{ index: number; title: string; text: string }> = [];
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
+      const startOffset = ch.startOffset || 0;
+      let endOffset: number;
+      if (i + 1 < chapters.length) {
+        endOffset = chapters[i + 1].startOffset;
+      } else {
+        endOffset = fullText.length;
+      }
+      const text = fullText.substring(startOffset, endOffset).trim();
+      if (text.length > 0) {
+        result.push({
+          index: ch.index,
+          title: ch.title || `第${ch.index}章`,
+          text,
+        });
+      }
+    }
+    return result;
   }
 
   /**

@@ -24,12 +24,18 @@ export class RelationRepo {
       const result = await session.run(
         `MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c1:Character)-[r:RELATES_TO]->(c2:Character)
          MATCH (n)-[:HAS_CHARACTER]->(c2)
-         RETURN c1.id AS sourceId, c2.id AS targetId, r`,
+         RETURN c1.id AS sourceId, c1.name AS sourceName, c2.id AS targetId, c2.name AS targetName, r`,
         { novelId }
       );
       return result.records.map(r => {
         const rel = r.get('r').properties;
-        return { ...rel, sourceId: r.get('sourceId'), targetId: r.get('targetId') } as Relation;
+        return {
+          ...rel,
+          sourceId: r.get('sourceId'),
+          sourceName: r.get('sourceName'),
+          targetId: r.get('targetId'),
+          targetName: r.get('targetName'),
+        } as Relation;
       });
     } finally {
       await session.close();
@@ -57,6 +63,43 @@ export class RelationRepo {
           targetName: r.get('targetName'),
         } as Relation;
       });
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * 批量查询多个角色的关系（替代 N 次 findByCharacter 调用）
+   */
+  async findByCharacterIds(characterIds: string[]): Promise<Map<string, Relation[]>> {
+    if (characterIds.length === 0) return new Map();
+    const session = getSession();
+    try {
+      const result = await session.run(
+        `MATCH (c1:Character)-[r:RELATES_TO]->(c2:Character)
+         WHERE c1.id IN $ids OR c2.id IN $ids
+         RETURN c1.id AS sourceId, c1.name AS sourceName, c2.id AS targetId, c2.name AS targetName, r`,
+        { ids: characterIds }
+      );
+      const relationMap = new Map<string, Relation[]>();
+      for (const record of result.records) {
+        const rel: Relation = {
+          ...record.get('r').properties,
+          sourceId: record.get('sourceId'),
+          sourceName: record.get('sourceName'),
+          targetId: record.get('targetId'),
+          targetName: record.get('targetName'),
+        } as Relation;
+        // 添加到 sourceId 和 targetId 对应的列表
+        for (const charId of characterIds) {
+          if (rel.sourceId === charId || rel.targetId === charId) {
+            const list = relationMap.get(charId) || [];
+            list.push(rel);
+            relationMap.set(charId, list);
+          }
+        }
+      }
+      return relationMap;
     } finally {
       await session.close();
     }

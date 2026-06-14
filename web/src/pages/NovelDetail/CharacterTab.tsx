@@ -19,8 +19,9 @@ const CharacterTab: React.FC<Props> = ({ novelId }) => {
     try {
       const res = await searchCharacters(novelId, keyword);
       setResults(res.data || []);
-    } catch (err) {
-      message.error('搜索失败');
+    } catch (err: any) {
+      console.error('搜索失败:', err?.response?.status, err?.response?.data || err?.message || err);
+      message.error(`搜索失败: ${err?.response?.status || err?.message || '未知错误'}`);
     }
   };
 

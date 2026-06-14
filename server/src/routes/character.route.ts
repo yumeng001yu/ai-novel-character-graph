@@ -12,20 +12,22 @@ import path from 'path';
 import { getConfig } from '../config';
 
 export async function characterRoutes(app: FastifyInstance) {
-  // 角色搜索（支持语义搜索）
-  app.get('/search', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { keyword, novelId } = req.query as any;
+  // 角色搜索（支持语义搜索，同时支持 GET 和 POST）
+  const handleSearch = async (keyword: string, novelId: string, reply: FastifyReply) => {
     if (!keyword || !novelId) return reply.status(400).send({ error: '缺少参数' });
 
     // 先尝试语义搜索
     if (await embeddingService.isConfigured()) {
       const semanticResults = await vectorSearchService.semanticSearch(novelId, keyword);
       if (semanticResults.length > 0) {
-        // 补充完整角色信息
+        // 补充完整角色信息（排除 embedding 等大字段）
         const characters = [];
         for (const r of semanticResults) {
           const char = await characterRepo.findById(r.id);
-          if (char) characters.push({ ...char, searchScore: r.score });
+          if (char) {
+            const { embedding, ...rest } = char as any;
+            characters.push({ ...rest, searchScore: r.score });
+          }
         }
         if (characters.length > 0) {
           reply.send(characters);
@@ -36,7 +38,21 @@ export async function characterRoutes(app: FastifyInstance) {
 
     // 回退到关键词搜索
     const characters = await searchIndexerService.search(novelId, keyword);
-    reply.send(characters);
+    // 排除 embedding 等大字段
+    reply.send(characters.map((c: any) => {
+      const { embedding, ...rest } = c;
+      return rest;
+    }));
+  };
+
+  app.get('/search', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { keyword, novelId } = req.query as any;
+    await handleSearch(keyword, novelId, reply);
+  });
+
+  app.post('/search', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { keyword, novelId } = req.body as any;
+    await handleSearch(keyword, novelId, reply);
   });
 
   // 角色详情
@@ -45,11 +61,12 @@ export async function characterRoutes(app: FastifyInstance) {
     const character = await characterRepo.findById(id);
     if (!character) return reply.status(404).send({ error: '角色未找到' });
 
+    const { embedding, ...charRest } = character as any;
     const relations = await relationRepo.findByCharacter(id);
-    reply.send({ character, relations });
+    reply.send({ character: charRest, relations });
   });
 
-  // 角色经历时间线
+  // 角色经历时间线（含关系变化）
   app.get('/:id/timeline', async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as any;
     const character = await characterRepo.findById(id);
@@ -61,10 +78,58 @@ export async function characterRoutes(app: FastifyInstance) {
     }
     const profileDir = path.resolve(getConfig().build.snapshot_dir, '..', 'profiles', character.novelId);
     const profilePath = path.join(profileDir, `${id}.json`);
-    if (!fs.existsSync(profilePath)) return reply.send({ experienceTimeline: [] });
 
-    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf-8'));
-    reply.send({ experienceTimeline: profile.experienceTimeline, personalAnalysis: profile.personalAnalysis });
+    let experienceTimeline: any[] = [];
+    let personalAnalysis: any = null;
+
+    if (fs.existsSync(profilePath)) {
+      const profile = JSON.parse(fs.readFileSync(profilePath, 'utf-8'));
+      experienceTimeline = profile.experienceTimeline || [];
+      personalAnalysis = profile.personalAnalysis || null;
+    }
+
+    // 获取关系变化时间线（按 sinceChapter 排序）
+    const relations = await relationRepo.findByCharacter(id);
+    const relationTimeline = relations
+      .sort((a, b) => a.sinceChapter - b.sinceChapter)
+      .map(r => {
+        const otherName = r.sourceId === id ? r.targetName : r.sourceName;
+        return {
+          chapter: r.sinceChapter,
+          type: '关系变化' as const,
+          event: `与${otherName || '未知'}建立${r.relationType}关系`,
+          detail: r.description,
+          relationType: r.relationType,
+          withCharacter: otherName,
+          confidence: r.confidence,
+          importance: r.importance,
+          isInference: r.isInference,
+        };
+      });
+
+    // 合并经历和关系时间线，按章节排序
+    const mergedTimeline = [
+      ...experienceTimeline.map((e: any) => ({ ...e, type: e.type || '经历' })),
+      ...relationTimeline,
+    ].sort((a, b) => (a.chapter || 0) - (b.chapter || 0));
+
+    reply.send({
+      character: {
+        id: character.id,
+        name: character.name,
+        aliases: character.aliases,
+        gender: character.gender,
+        faction: character.faction,
+        identity: character.identity,
+        isProtagonist: character.isProtagonist,
+        profile: (character as any).profile,
+        keyTraits: (character as any).keyTraits,
+      },
+      experienceTimeline: mergedTimeline,
+      personalAnalysis,
+      totalEvents: experienceTimeline.length,
+      totalRelations: relations.length,
+    });
   });
 
   // 角色合并
