@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Select, InputNumber, Switch, message, Space, Alert, Tag } from 'antd';
 import { getAiConfig, saveAiConfig, testAiConnection, getModels, getBuildConfig, saveBuildConfig, getEmbeddingConfig, saveEmbeddingConfig, testEmbeddingConnection, getEmbeddingModels, getRerankerConfig, saveRerankerConfig, testRerankerConnection } from '../../services/api';
+import PromptPresetSettings from './PromptPresetSettings';
 
 const Settings: React.FC = () => {
   const [aiForm] = Form.useForm();
@@ -256,6 +257,8 @@ const Settings: React.FC = () => {
           </Form.Item>
         </Form>
       </Card>
+
+      <PromptPresetSettings />
 
       <Card title="构建配置">
         <Form form={buildForm} layout="vertical">

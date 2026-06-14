@@ -5,6 +5,17 @@ import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
 
+/** 获取代理配置 */
+function getProxyAgent(): any {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    return new HttpsProxyAgent(proxyUrl);
+  }
+  return undefined;
+}
+
 function getRerankerSettingsPath(): string {
   const { getConfig } = require('../config');
   const config = getConfig();
@@ -100,6 +111,7 @@ export class RerankerService {
           'Content-Type': 'application/json',
         },
         timeout: 30000,
+        httpsAgent: getProxyAgent(),
       }
     );
 
@@ -129,6 +141,7 @@ export class RerankerService {
             'Content-Type': 'application/json',
           },
           timeout: 15000,
+          httpsAgent: getProxyAgent(),
         }
       );
       return { success: true, message: '连接成功' };

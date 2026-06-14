@@ -14,6 +14,10 @@ const logger = getLogger();
 const IMPORTANCE_THRESHOLD = 6;
 // 每次AI调用最大字符数（约4000 tokens）
 const MAX_CHUNK_CHARS = 8000;
+// 并行提取经历的最大并发数
+const ENRICH_CONCURRENCY = 5;
+// 角色提及次数阈值：提及次数低于此值的角色跳过经历提取
+const MIN_MENTIONS_FOR_ENRICH = 2;
 
 export class ProfileBuilderService {
   /**
@@ -30,6 +34,9 @@ export class ProfileBuilderService {
 
     logger.info(`开始全文关键经历提取，共 ${characters.length} 个角色，${chapters.length} 个章节`);
 
+    // 预处理：提取每个章节的文本
+    const chapterTexts = this.splitFullTextByChapters(fullText, chapters);
+
     // 按角色出场顺序处理，主角优先
     const sorted = [...characters].sort((a, b) => {
       if (a.isProtagonist && !b.isProtagonist) return -1;
@@ -37,16 +44,51 @@ export class ProfileBuilderService {
       return a.firstAppearChapter - b.firstAppearChapter;
     });
 
-    // 预处理：提取每个章节的文本
-    const chapterTexts = this.splitFullTextByChapters(fullText, chapters);
+    // 过滤次要角色：计算每个角色在全文中的提及次数
+    const enrichCandidates: any[] = [];
+    const minorCharacters: any[] = [];
 
     for (const character of sorted) {
-      try {
-        await this.enrichSingleProfile(character, novelId, chapterTexts, onStream);
-      } catch (err) {
-        if (err instanceof AIContentRefusedError) continue;
-        logger.error({ err, characterId: character.id, characterName: character.name }, '角色档案丰富化失败');
+      const charNames = [character.name, ...(character.aliases || [])];
+      let mentionCount = 0;
+      for (const name of charNames) {
+        const regex = new RegExp(name, 'g');
+        const matches = fullText.match(regex);
+        mentionCount += (matches?.length || 0);
       }
+      if (character.isProtagonist || mentionCount >= MIN_MENTIONS_FOR_ENRICH) {
+        enrichCandidates.push(character);
+      } else {
+        minorCharacters.push({ character, mentionCount });
+        logger.info({ characterName: character.name, mentionCount }, '角色提及次数不足，标记为次要角色');
+      }
+    }
+
+    logger.info(`经历提取候选：${enrichCandidates.length}/${sorted.length} 个角色（已过滤次要角色）`);
+
+    // 并行处理角色，控制并发数
+    let index = 0;
+    const results: Promise<void>[] = [];
+
+    const processNext = async (): Promise<void> => {
+      while (index < enrichCandidates.length) {
+        const character = enrichCandidates[index++];
+        try {
+          await this.enrichSingleProfile(character, novelId, chapterTexts, onStream);
+        } catch (err) {
+          if (err instanceof AIContentRefusedError) continue;
+          logger.error({ err, characterId: character.id, characterName: character.name }, '角色档案丰富化失败');
+        }
+      }
+    };
+
+    // 启动 ENRICH_CONCURRENCY 个并行 worker
+    const workers = Array.from({ length: Math.min(ENRICH_CONCURRENCY, enrichCandidates.length) }, () => processNext());
+    await Promise.all(workers);
+
+    // 为次要角色生成轻量级档案（一次性批量处理，减少 AI 调用次数）
+    if (minorCharacters.length > 0) {
+      await this.generateMinorProfiles(minorCharacters, novelId, fullText, onStream);
     }
 
     logger.info('全文关键经历提取完成');
@@ -153,10 +195,24 @@ export class ProfileBuilderService {
       keyExperiences: keyExperiences.length,
     }, '关键经历提取完成');
 
-    // 生成个人分析
-    const personalAnalysis = await this.generatePersonalAnalysis(
+    // 生成个人分析（含重试机制）
+    let personalAnalysis = await this.generatePersonalAnalysis(
       character, keyExperiences, eventsSummary, relationsSummary, onStream,
     );
+
+    // 重试：如果个人分析为空，换简化 prompt 重试一次
+    if (!personalAnalysis.characterArc && !personalAnalysis.personality && !personalAnalysis.motivation) {
+      logger.info({ characterName: character.name }, '个人分析为空，使用简化 prompt 重试');
+      personalAnalysis = await this.generatePersonalAnalysisSimple(
+        character, keyExperiences, onStream,
+      );
+    }
+
+    // 兜底：如果重试后仍为空，用经历摘要生成基本分析
+    if (!personalAnalysis.characterArc && !personalAnalysis.personality && !personalAnalysis.motivation && keyExperiences.length > 0) {
+      logger.info({ characterName: character.name }, '个人分析仍为空，使用经历摘要兜底');
+      personalAnalysis = this.buildFallbackAnalysis(character, keyExperiences);
+    }
 
     // 构建最终档案
     const profile: CharacterProfile = existingProfile || {
@@ -380,6 +436,176 @@ ${relationsSummary}
   }
 
   /**
+   * 简化版个人分析生成（重试用）
+   * 使用更简洁的 prompt，减少 AI 返回空的概率
+   */
+  private async generatePersonalAnalysisSimple(
+    character: any,
+    keyExperiences: ExperienceEvent[],
+    onStream?: AIStreamCallback,
+  ): Promise<PersonalAnalysis> {
+    const timelineText = keyExperiences.length > 0
+      ? keyExperiences.map(e => `第${e.chapter}章 ${e.event}`).join('；')
+      : '暂无';
+
+    const prompt = `请简要分析小说角色"${character.name}"（${character.identity || '身份未知'}）。
+
+其关键经历如下：${timelineText}
+
+请返回JSON：
+{
+  "characterArc": "发展轨迹（50字以内）",
+  "personality": "性格（用分号分隔，30字以内）",
+  "motivation": "核心动机（20字以内）"
+}`;
+
+    try {
+      const response = await callAIStream(
+        prompt,
+        '请只返回JSON，不要返回其他内容。',
+        { onStream, phase: 'profile_enrichment_retry' },
+      );
+      const parsed = this.parseAIResponse(response);
+
+      return {
+        characterArc: parsed.characterArc || '',
+        personality: parsed.personality || '',
+        motivation: parsed.motivation || '',
+        keyRelationships: [],
+        inferences: [],
+      };
+    } catch (err) {
+      return {
+        characterArc: '',
+        personality: '',
+        motivation: '',
+        keyRelationships: [],
+        inferences: [],
+      };
+    }
+  }
+
+  /**
+   * 兜底：基于经历摘要生成基本分析（不调用 AI）
+   */
+  private buildFallbackAnalysis(character: any, keyExperiences: ExperienceEvent[]): PersonalAnalysis {
+    const expSummary = keyExperiences
+      .sort((a, b) => a.chapter - b.chapter)
+      .map(e => e.event)
+      .join('；');
+
+    // 从经历类型推断性格倾向
+    const types = keyExperiences.map(e => e.type);
+    const hasCrisis = types.includes('危机');
+    const hasTurningPoint = types.includes('转折点');
+    const hasGrowth = types.includes('成长');
+
+    const personalityParts: string[] = [];
+    if (hasTurningPoint) personalityParts.push('经历重大转折');
+    if (hasCrisis) personalityParts.push('面对危机');
+    if (hasGrowth) personalityParts.push('有所成长');
+    if (personalityParts.length === 0) personalityParts.push('经历平淡');
+
+    return {
+      characterArc: expSummary,
+      personality: personalityParts.join('；'),
+      motivation: '',
+      keyRelationships: [],
+      inferences: [],
+    };
+  }
+
+  /**
+   * 为次要角色生成轻量级档案
+   * 将所有次要角色信息合并为一个 AI 调用，一次性生成简要档案
+   */
+  private async generateMinorProfiles(
+    minorCharacters: Array<{ character: any; mentionCount: number }>,
+    novelId: string,
+    fullText: string,
+    onStream?: AIStreamCallback,
+  ): Promise<void> {
+    if (minorCharacters.length === 0) return;
+
+    logger.info(`开始为 ${minorCharacters.length} 个次要角色生成轻量级档案`);
+
+    // 构建次要角色列表文本
+    const minorList = minorCharacters.map(({ character, mentionCount }) => {
+      const charNames = [character.name, ...(character.aliases || [])];
+      // 提取角色在原文中出现的上下文片段（前后各50字）
+      const contexts: string[] = [];
+      for (const name of charNames) {
+        const idx = fullText.indexOf(name);
+        if (idx >= 0) {
+          const start = Math.max(0, idx - 50);
+          const end = Math.min(fullText.length, idx + name.length + 50);
+          contexts.push(fullText.substring(start, end).replace(/\n/g, ' '));
+          if (contexts.length >= 2) break; // 最多取2个上下文片段
+        }
+      }
+      return `- ${character.name}${character.aliases?.length ? `（别名:${character.aliases.join('/')}）` : ''}，${character.identity || '身份未知'}，提及${mentionCount}次。上下文：${contexts.join('；') || '无'}`;
+    }).join('\n');
+
+    const prompt = `以下是小说中的次要角色列表，请为每个角色生成简要的性格分析。
+
+${minorList}
+
+请返回JSON格式：
+{
+  "profiles": [
+    {"name": "角色名", "personality": "性格特征（用分号分隔，20字以内）", "characterArc": "简要发展轨迹（30字以内）"}
+  ]
+}
+
+注意：
+- 只需为列表中的角色生成分析
+- 性格特征要基于上下文片段推断，不要凭空猜测
+- 如果信息不足以推断，personality 可填"信息不足"`;
+
+    try {
+      const response = await callAIStream(
+        prompt,
+        '你是小说角色分析专家。请只返回JSON。',
+        { onStream, phase: 'minor_profile' },
+      );
+      const parsed = this.parseAIResponse(response);
+      const profiles = parsed.profiles || [];
+
+      for (const p of profiles) {
+        const minorEntry = minorCharacters.find(mc => mc.character.name === p.name);
+        if (!minorEntry) continue;
+
+        const character = minorEntry.character;
+        const profile: CharacterProfile = {
+          id: uuid(),
+          characterId: character.id,
+          basicInfo: {
+            aliases: character.aliases,
+            gender: character.gender,
+            faction: character.faction,
+            identity: character.identity,
+            firstAppear: `${character.firstAppearChapter}`,
+          },
+          experienceTimeline: [],
+          personalAnalysis: {
+            characterArc: p.characterArc || '',
+            personality: p.personality || '',
+            motivation: '',
+            keyRelationships: [],
+            inferences: [],
+          },
+          chaptersInvolved: [],
+        };
+
+        this.saveProfile(novelId, character.id, profile);
+        logger.info({ characterName: character.name }, '次要角色轻量级档案已生成');
+      }
+    } catch (err) {
+      logger.warn({ err }, '次要角色轻量级档案生成失败（非致命）');
+    }
+  }
+
+  /**
    * 去重经历：相同章节+相似描述只保留评分最高的
    */
   private deduplicateExperiences(experiences: ExperienceEvent[]): ExperienceEvent[] {
@@ -475,6 +701,24 @@ ${relationsSummary}
     const dir = this.getProfileDir(novelId);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${characterId}.json`), JSON.stringify(profile, null, 2));
+
+    // 同步更新 Neo4j 中的 profile 和 keyTraits 字段
+    const profileSummary = [
+      profile.personalAnalysis?.characterArc || '',
+      profile.personalAnalysis?.personality || '',
+      profile.personalAnalysis?.motivation || '',
+    ].filter(Boolean).join('；');
+
+    const keyTraits = profile.personalAnalysis?.personality
+      ? profile.personalAnalysis.personality.split(/[；;、,，]/).map((s: string) => s.trim()).filter(Boolean)
+      : [];
+
+    characterRepo.update(characterId, {
+      profile: profileSummary || undefined,
+      keyTraits: keyTraits.length > 0 ? keyTraits : undefined,
+    }).catch(err => {
+      logger.warn({ err, characterId }, '同步角色档案到 Neo4j 失败（非致命）');
+    });
   }
 }
 

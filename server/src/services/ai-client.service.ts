@@ -32,10 +32,17 @@ export async function getOpenAIClient(): Promise<OpenAI> {
     return openaiClient;
   }
 
-  openaiClient = new OpenAI({
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  const clientOptions: any = {
     apiKey,
     baseURL: config.apiUrl,
-  });
+  };
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    clientOptions.httpAgent = new HttpsProxyAgent(proxyUrl);
+  }
+  openaiClient = new OpenAI(clientOptions);
   currentConfigHash = hash;
   return openaiClient;
 }
@@ -44,6 +51,26 @@ export async function getOpenAIClient(): Promise<OpenAI> {
 function truncate(text: string, maxLen: number = 2000): string {
   if (text.length <= maxLen) return text;
   return text.substring(0, maxLen) + `...（共${text.length}字，已截断）`;
+}
+
+/**
+ * 剥离 AI 模型的思维链（thinking）输出
+ * 部分模型（如 MiniMax-M2.7、DeepSeek-R1）会在 content 中输出 <think/> 标签包裹的思维过程
+ * 需要在解析 JSON 之前将其移除，否则会导致 JSON 解析失败
+ */
+function stripThinkingContent(content: string): string {
+  // 移除 <think...</think > 标签及其内容（支持多行）
+  let cleaned = content.replace(/<think[\s\S]*?<\/think\s*>/g, '');
+  // 移除未闭合的 <think...> 标签到内容开头（某些模型只输出 <think > 开头）
+  cleaned = cleaned.replace(/<think[^>]*>[\s\S]*/, (match) => {
+    // 如果匹配内容中包含 JSON 结构，保留 JSON 部分
+    const jsonStart = match.search(/[\[{]/);
+    if (jsonStart > 0) {
+      return match.substring(jsonStart);
+    }
+    return '';
+  });
+  return cleaned.trim();
 }
 
 export interface CallAIOptions {
@@ -111,6 +138,10 @@ export async function callAI(
       const content = response.choices[0]?.message?.content;
       if (!content) throw new Error('AI 返回内容为空');
 
+      // 剥离思维链内容
+      const cleanContent = stripThinkingContent(content);
+      if (!cleanContent) throw new Error('AI 返回内容为空（剥离思维链后）');
+
       // 检测 AI 内容审核拒绝
       const finishReason = response.choices[0]?.finish_reason;
       if (finishReason === 'content_filter') {
@@ -122,13 +153,13 @@ export async function callAI(
         throw new AIContentRefusedError(`AI 模型拒绝处理：${refusalField}`);
       }
 
-      const contentRefused = detectContentRefusal(content);
+      const contentRefused = detectContentRefusal(cleanContent);
       if (contentRefused) {
         throw new AIContentRefusedError(contentRefused);
       }
 
       // 记录成功日志
-      logEntry.response = truncate(content);
+      logEntry.response = truncate(cleanContent);
       logEntry.duration = Date.now() - startTime;
       const usage = response.usage;
       if (usage) {
@@ -144,7 +175,7 @@ export async function callAI(
         onAICall(logEntry);
       }
 
-      return content;
+      return cleanContent;
     } catch (err: any) {
       lastError = err;
 
@@ -179,24 +210,53 @@ export async function callAI(
 /**
  * 流式调用 AI，逐字推送输出到前端
  * 返回完整响应文本（与 callAI 接口一致），但过程中通过 onStream 回调实时推送增量
+ *
+ * 支持两种调用方式：
+ * 1. prompt 为字符串：传统方式，systemPrompt 作为 system 消息
+ * 2. prompt 为消息数组：直接传入消息列表，忽略 systemPrompt
  */
 export async function callAIStream(
-  prompt: string,
+  prompt: string | Array<{ role: string; content: string; name?: string }>,
   systemPrompt?: string,
   options?: {
     retries?: number;
     onStream?: AIStreamCallback;
     phase?: string;
+    maxTokens?: number;
   },
 ): Promise<string> {
   const config = await aiSettingsRepo.load();
   if (!config) throw new Error('AI 配置未设置');
 
   const maxRetries = options?.retries ?? getConfig().build.default_max_retries;
+  const effectiveMaxTokens = options?.maxTokens ?? config.maxTokens;
   const client = await getOpenAIClient();
   const onStream = options?.onStream;
   const phase = options?.phase || 'unknown';
   let lastError: Error | null = null;
+
+  // 构建消息列表
+  const buildMessageList = (): any[] => {
+    if (typeof prompt === 'string') {
+      const messages: any[] = [];
+      if (systemPrompt) {
+        messages.push({ role: 'system', content: systemPrompt });
+      }
+      messages.push({ role: 'user', content: prompt });
+      return messages;
+    } else {
+      // prompt 是消息数组，直接使用
+      return prompt.map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.name ? { name: m.name } : {}),
+      }));
+    }
+  };
+
+  const promptDesc = typeof prompt === 'string'
+    ? truncate(prompt)
+    : truncate(prompt.map(m => `${m.role}: ${m.content}`).join('\n'));
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const logId = uuid();
@@ -208,26 +268,22 @@ export async function callAIStream(
         logId,
         type: 'start',
         phase,
-        prompt: truncate(prompt),
+        prompt: promptDesc,
         systemPrompt: systemPrompt ? truncate(systemPrompt, 500) : undefined,
       });
     }
 
     try {
-      const messages: any[] = [];
-      if (systemPrompt) {
-        messages.push({ role: 'system', content: systemPrompt });
-      }
-      messages.push({ role: 'user', content: prompt });
+      const messages = buildMessageList();
 
       // 流式调用（stream_options 仅部分 API 支持，失败时回退到不带该参数）
-      let stream;
+      let stream: any;
       try {
         stream = await client.chat.completions.create({
           model: config.model,
           messages,
           temperature: config.temperature,
-          max_tokens: config.maxTokens,
+          max_tokens: effectiveMaxTokens,
           stream: true,
           stream_options: { include_usage: true },
         });
@@ -238,7 +294,7 @@ export async function callAIStream(
             model: config.model,
             messages,
             temperature: config.temperature,
-            max_tokens: config.maxTokens,
+            max_tokens: effectiveMaxTokens,
             stream: true,
           });
         } else {
@@ -247,19 +303,85 @@ export async function callAIStream(
       }
 
       let fullContent = '';
+      let inThinkingBlock = false;
+      let thinkingBuffer = '';
+
+      // 起始缓冲区：积累初始内容以检测和清除格式问题
+      // （如思维链后的单字前缀、前导空白/空行）
+      let startBuffer = '';
+      let startBufferFlushed = false;
+      const START_BUFFER_MIN = 8; // 最少非空白字符数才开始刷新
+
+      /** 刷新起始缓冲区，清除格式问题后推送 */
+      const flushStartBuffer = () => {
+        if (startBufferFlushed || !onStream) return;
+        let cleaned = startBuffer.replace(/^\s+/, '');
+        // 如果第一行只有1个字符就换行，说明是前缀/语气词，跳过
+        const firstNewline = cleaned.search(/\n/);
+        if (firstNewline === 1) {
+          cleaned = cleaned.substring(2).replace(/^\s+/, '');
+        }
+        if (cleaned) {
+          onStream({ logId, type: 'delta', phase, delta: cleaned });
+        }
+        startBuffer = '';
+        startBufferFlushed = true;
+      };
+
+      /** 发送内容或缓冲（起始缓冲区未刷新时） */
+      const sendOrBuffer = (content: string) => {
+        if (!content || !onStream) return;
+        if (!startBufferFlushed) {
+          startBuffer += content;
+          if (startBuffer.replace(/\s/g, '').length >= START_BUFFER_MIN) {
+            flushStartBuffer();
+          }
+        } else {
+          onStream({ logId, type: 'delta', phase, delta: content });
+        }
+      };
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content;
         if (delta) {
           fullContent += delta;
-          // 推送 delta 事件
-          if (onStream) {
-            onStream({
-              logId,
-              type: 'delta',
-              phase,
-              delta,
-            });
+
+          // 流式过滤思维链：<think...> 到 </think > 之间的内容不推送给前端
+          if (!inThinkingBlock) {
+            thinkingBuffer += delta;
+            const thinkStart = thinkingBuffer.indexOf('<think');
+            if (thinkStart !== -1) {
+              inThinkingBlock = true;
+              const beforeThink = thinkingBuffer.substring(0, thinkStart);
+              if (beforeThink.trim()) {
+                sendOrBuffer(beforeThink);
+              }
+              thinkingBuffer = thinkingBuffer.substring(thinkStart);
+            } else {
+              const safeLen = Math.max(0, thinkingBuffer.length - 6);
+              if (safeLen > 0) {
+                const toSend = thinkingBuffer.substring(0, safeLen);
+                sendOrBuffer(toSend);
+                thinkingBuffer = thinkingBuffer.substring(safeLen);
+              }
+            }
+          } else {
+            thinkingBuffer += delta;
+            const thinkEnd = thinkingBuffer.indexOf('</think');
+            if (thinkEnd !== -1) {
+              inThinkingBlock = false;
+              const afterThink = thinkingBuffer.substring(thinkEnd);
+              const closeTagEnd = afterThink.indexOf('>');
+              if (closeTagEnd !== -1) {
+                const remainder = afterThink.substring(closeTagEnd + 1);
+                thinkingBuffer = '';
+                if (remainder) {
+                  sendOrBuffer(remainder);
+                }
+              } else {
+                thinkingBuffer = '';
+              }
+            }
           }
         }
 
@@ -275,10 +397,25 @@ export async function callAIStream(
         }
       }
 
+      // 刷新剩余的思维缓冲区
+      if (thinkingBuffer && !inThinkingBlock) {
+        sendOrBuffer(thinkingBuffer);
+        thinkingBuffer = '';
+      }
+
+      // 刷新起始缓冲区（如果尚未刷新）
+      if (!startBufferFlushed && startBuffer) {
+        flushStartBuffer();
+      }
+
       if (!fullContent) throw new Error('AI 返回内容为空');
 
+      // 剥离思维链内容（确保 fullContent 不含 <think/> 标签）
+      const cleanContent = stripThinkingContent(fullContent);
+      if (!cleanContent) throw new Error('AI 返回内容为空（剥离思维链后）');
+
       // 检测内容审核拒绝
-      const contentRefused = detectContentRefusal(fullContent);
+      const contentRefused = detectContentRefusal(cleanContent);
       if (contentRefused) {
         throw new AIContentRefusedError(contentRefused);
       }
@@ -289,13 +426,13 @@ export async function callAIStream(
           logId,
           type: 'done',
           phase,
-          fullResponse: truncate(fullContent),
+          fullResponse: truncate(cleanContent),
           duration: Date.now() - startTime,
           retryCount: attempt - 1,
         });
       }
 
-      return fullContent;
+      return cleanContent;
     } catch (err: any) {
       lastError = err;
 
@@ -398,7 +535,14 @@ export async function getModelList(apiUrl: string, apiKey: string): Promise<{ id
     url += '/models';
   }
 
-  const client = new OpenAI({ apiKey, baseURL: url.replace(/\/models$/, '') });
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  const clientOpts: any = { apiKey, baseURL: url.replace(/\/models$/, '') };
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    clientOpts.httpAgent = new HttpsProxyAgent(proxyUrl);
+  }
+  const client = new OpenAI(clientOpts);
   const models = await client.models.list();
 
   const modelList: { id: string; name: string; contextLength?: number; tags: string[] }[] = [];

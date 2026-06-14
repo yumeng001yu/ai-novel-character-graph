@@ -47,6 +47,8 @@ export interface Character {
   isProtagonist: boolean;
   protagonistOrder?: number;
   disambiguationStatus: DisambiguationStatus;
+  profile?: string;
+  keyTraits?: string[];
   novelId: string;
 }
 
@@ -104,6 +106,8 @@ export interface Relation {
   sinceChapter: number;
   untilChapter: number | null;
   strength: number;
+  confidence: number; // 置信度 0-1，基于原文明确程度和AI提取确定性
+  importance: number; // 重要性 1-10，基于关系对角色命运的影响程度
   isInference: boolean;
   inferenceBasis?: string;
   description: string;
@@ -169,7 +173,7 @@ export interface BuildConfig {
 }
 
 // ===== 任务相关 =====
-export type TaskStatus = 'pending' | 'running' | 'canceling' | 'canceled' | 'completed' | 'failed';
+export type TaskStatus = 'pending' | 'running' | 'canceling' | 'canceled' | 'completed' | 'failed' | 'interrupted';
 
 export interface BuildTask {
   novelId: string;

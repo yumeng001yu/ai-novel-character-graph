@@ -17,12 +17,17 @@ export const getNovel = (id: string) => api.get(`/novels/${id}`);
 export const deleteNovel = (id: string) => api.delete(`/novels/${id}`);
 
 // 图谱
-export const getGraph = (novelId: string, params?: { center?: string; step?: number }) =>
-  api.get(`/novels/${novelId}/graph`, { params });
+export const getGraph = (novelId: string, params?: { center?: string; step?: number }) => {
+  // 如果有 center 参数（中文），使用 POST 避免 URL 编码问题
+  if (params?.center) {
+    return api.post(`/novels/${novelId}/graph`, { center: params.center, step: params.step });
+  }
+  return api.get(`/novels/${novelId}/graph`, { params });
+};
 
 // 角色
 export const searchCharacters = (novelId: string, keyword: string) =>
-  api.get('/characters/search', { params: { novelId, keyword } });
+  api.post('/characters/search', { novelId, keyword });
 export const getCharacter = (id: string) => api.get(`/characters/${id}`);
 export const getCharacterTimeline = (id: string) => api.get(`/characters/${id}/timeline`);
 export const mergeCharacters = (characterIds: string[], primaryId: string) =>
@@ -101,5 +106,16 @@ export const queryGlobalGraphRAG = (question: string) =>
 // 角色对话
 export const getNovelCharacters = (novelId: string) =>
   api.get(`/character-chat/characters/${novelId}`);
+
+// 提示词预设
+export const getPromptPresets = () => api.get('/prompt-presets');
+export const getPromptPreset = (id: string) => api.get(`/prompt-presets/${id}`);
+export const createPromptPreset = (name: string, basedOn?: string) =>
+  api.post('/prompt-presets', { name, basedOn });
+export const updatePromptPreset = (id: string, data: any) => api.put(`/prompt-presets/${id}`, data);
+export const deletePromptPreset = (id: string) => api.delete(`/prompt-presets/${id}`);
+export const setDefaultPromptPreset = (id: string) =>
+  api.post(`/prompt-presets/${id}/set-default`);
+export const getPromptMacros = () => api.get('/prompt-presets/macros/list');
 
 export default api;

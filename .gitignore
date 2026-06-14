@@ -8,3 +8,6 @@ config/encryption.key
 config.local.yaml
 *.pyc
 .DS_Store
+server/config/
+package-lock.json
+web/tsconfig.tsbuildinfo

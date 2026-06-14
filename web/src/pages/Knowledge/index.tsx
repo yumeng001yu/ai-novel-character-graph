@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Row, Col, Input, Tag, Popconfirm, Button, Empty, Spin, message, theme, Typography, Space, Select, Modal, Avatar, Tooltip } from 'antd';
-import { SearchOutlined, DeleteOutlined, BookOutlined, SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, TeamOutlined, BulbOutlined, PlusOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Input, Tag, Popconfirm, Button, Empty, Spin, message, theme, Space, Select, Tooltip } from 'antd';
+import { SearchOutlined, DeleteOutlined, BookOutlined, SendOutlined, UserOutlined, RobotOutlined, MessageOutlined, TeamOutlined, BulbOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getKnowledgeBase, searchKnowledgeBase, deleteNovel, getNovelCharacters } from '../../services/api';
-
-const { Paragraph } = Typography;
 
 interface NovelItem {
   id: string;
@@ -314,8 +312,8 @@ const Knowledge: React.FC = () => {
   const completedNovels = novels.filter(n => n.buildStatus === 'completed');
 
   // ===== 渲染聊天消息 =====
-  const renderMessages = (messages: ChatMessage[], containerRef: React.RefObject<HTMLDivElement | null>) => (
-    <div ref={containerRef} style={{
+  const renderMessages = (messages: ChatMessage[], containerRef: React.RefObject<HTMLDivElement>) => (
+    <div ref={containerRef as React.LegacyRef<HTMLDivElement>} style={{
       flex: 1, overflowY: 'auto', padding: 12,
       background: themeToken.colorBgContainer, borderRadius: 8,
       border: `1px solid ${themeToken.colorBorder}`, marginBottom: 12,

@@ -51,8 +51,9 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
       if (center && !res.data.centerFound) {
         message.warning(`未找到角色「${center}」，已显示主角图谱`);
       }
-    } catch (err) {
-      message.error('加载图谱失败');
+    } catch (err: any) {
+      console.error('加载图谱失败:', err?.response?.status, err?.response?.data || err?.message || err);
+      message.error(`加载图谱失败: ${err?.response?.status || err?.message || '未知错误'}`);
     }
     setLoading(false);
     setLocating(false);

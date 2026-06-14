@@ -207,10 +207,17 @@ export class VectorSearchService {
       const results: Array<{ sourceId: string; targetId: string; score: number }> = [];
       const newChars = allCharacters.filter(c => newCharacterIds.includes(c.id));
 
-      for (const char of newChars) {
-        const similar = await this.findSimilarCharacters(novelId, char, 0.7);
-        for (const s of similar) {
-          results.push({ sourceId: char.id, targetId: s.id, score: s.score });
+      // 并行查找相似角色，限制并发数
+      const batchSize = 5;
+      for (let i = 0; i < newChars.length; i += batchSize) {
+        const batch = newChars.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map(char => this.findSimilarCharacters(novelId, char, 0.7))
+        );
+        for (let j = 0; j < batchResults.length; j++) {
+          for (const s of batchResults[j]) {
+            results.push({ sourceId: batch[j].id, targetId: s.id, score: s.score });
+          }
         }
       }
 

@@ -18,6 +18,34 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export class CharacterRepo {
+  /**
+   * 创建常用查询索引（启动时调用一次）
+   */
+  async ensureIndexes(): Promise<void> {
+    const session = getSession();
+    try {
+      // Character 节点索引
+      await session.run(`CREATE INDEX character_id IF NOT EXISTS FOR (c:Character) ON (c.id)`);
+      await session.run(`CREATE INDEX character_novelId IF NOT EXISTS FOR (c:Character) ON (c.novelId)`);
+      await session.run(`CREATE INDEX character_name IF NOT EXISTS FOR (c:Character) ON (c.name)`);
+      await session.run(`CREATE INDEX character_isProtagonist IF NOT EXISTS FOR (c:Character) ON (c.isProtagonist)`);
+      // Relation 关系属性索引
+      await session.run(`CREATE INDEX relation_id IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.id)`);
+      await session.run(`CREATE INDEX relation_createdStep IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.createdStep)`);
+      // Novel 节点索引
+      await session.run(`CREATE INDEX novel_id IF NOT EXISTS FOR (n:Novel) ON (n.id)`);
+      // Chapter 节点索引
+      await session.run(`CREATE INDEX chapter_novelId IF NOT EXISTS FOR (c:Chapter) ON (c.novelId)`);
+      // TextChunk 节点索引
+      await session.run(`CREATE INDEX textchunk_novelId IF NOT EXISTS FOR (t:TextChunk) ON (t.novelId)`);
+      logger.info('Neo4j 索引创建完成');
+    } catch (err) {
+      logger.warn(err, 'Neo4j 索引创建失败（非致命，可能索引已存在）');
+    } finally {
+      await session.close();
+    }
+  }
+
   async create(data: Omit<Character, 'id'>): Promise<Character> {
     const session = getSession();
     try {
@@ -40,6 +68,20 @@ export class CharacterRepo {
       const result = await session.run(`MATCH (c:Character {id: $id}) RETURN c`, { id });
       if (result.records.length === 0) return null;
       return result.records[0].get('c').properties as Character;
+    } finally {
+      await session.close();
+    }
+  }
+
+  async findByIds(ids: string[]): Promise<Character[]> {
+    if (ids.length === 0) return [];
+    const session = getSession();
+    try {
+      const result = await session.run(
+        `MATCH (c:Character) WHERE c.id IN $ids RETURN c`,
+        { ids }
+      );
+      return result.records.map(r => r.get('c').properties as Character);
     } finally {
       await session.close();
     }
@@ -80,7 +122,7 @@ export class CharacterRepo {
       const allowedFields = new Set([
         'name', 'aliases', 'gender', 'faction', 'identity', 'description',
         'firstAppearChapter', 'isProtagonist', 'protagonistOrder',
-        'disambiguationStatus', 'novelId',
+        'disambiguationStatus', 'novelId', 'profile', 'keyTraits',
       ]);
       const safeData: Record<string, any> = {};
       for (const [k, v] of Object.entries(data)) {
@@ -243,12 +285,12 @@ export class CharacterRepo {
       // 注意：db.index.vector.queryNodes 是全局搜索，需要扩大召回量再按小说过滤
       const recallK = topK * 5; // 扩大召回量，避免其他小说的角色挤占名额
       const result = await session.run(
-        `CALL db.index.vector.queryNodes('character_embedding', $recallK, $queryEmbedding)
+        `CALL db.index.vector.queryNodes('character_embedding', toInteger($recallK), $queryEmbedding)
          YIELD node, score
          MATCH (n:Novel {id: $novelId})-[:HAS_CHARACTER]->(c:Character)
          WHERE c.id = node.id
          RETURN c.id AS id, c.name AS name, score
-         LIMIT $topK`,
+         LIMIT toInteger($topK)`,
         { novelId, recallK, topK, queryEmbedding }
       );
       return result.records.map(r => ({
@@ -292,7 +334,7 @@ export class CharacterRepo {
         `CREATE VECTOR INDEX character_embedding IF NOT EXISTS
          FOR (c:Character) ON (c.embedding)
          OPTIONS {indexConfig: {
-           \`vector.dimensions\`: $dimensions,
+           \`vector.dimensions\`: toInteger($dimensions),
            \`vector.similarity_function\`: 'cosine'
          }}`,
         { dimensions }

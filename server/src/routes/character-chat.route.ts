@@ -9,13 +9,14 @@ interface ChatBody {
   message?: string;
   topic?: string;
   history?: Array<{ role: string; content: string; name?: string }>;
+  presetId?: string;
 }
 
 export async function characterChatRoutes(app: FastifyInstance) {
   // 与角色对话，支持 SSE 流式输出
   app.post('/chat', async (req: FastifyRequest, reply: FastifyReply) => {
     const body = req.body as ChatBody;
-    const { characterIds, novelId, mode, message, topic, history } = body;
+    const { characterIds, novelId, mode, message, topic, history, presetId } = body;
 
     if (!characterIds || !Array.isArray(characterIds) || characterIds.length === 0) {
       return reply.status(400).send({ error: '缺少 characterIds' });
@@ -48,6 +49,7 @@ export async function characterChatRoutes(app: FastifyInstance) {
         message,
         topic,
         history: history ?? [],
+        presetId,
       }, (event: any) => {
         if (event.type === 'delta' || event.type === 'done' || event.type === 'error') {
           reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);

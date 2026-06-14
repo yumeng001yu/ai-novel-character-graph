@@ -121,7 +121,7 @@ ${contextBlock}
     {"name": "角色名", "aliases": ["别名"], "gender": "性别", "faction": "阵营", "identity": "身份描述", "description": "外貌/特征描述"}
   ],
   "relations": [
-    {"sourceName": "角色A", "targetName": "角色B", "relationType": "关系类型", "description": "关系描述", "isInference": false, "inferenceBasis": ""}
+    {"sourceName": "角色A", "targetName": "角色B", "relationType": "关系类型", "description": "关系描述", "isInference": false, "inferenceBasis": "", "confidence": 0.9, "importance": 8}
   ],
   "events": [
     {"name": "事件名", "chapter": 0, "summary": "事件摘要", "eventType": "转折点/成长/危机/日常", "participantNames": ["参与者"]}
@@ -134,6 +134,8 @@ ${contextBlock}
 提取规则：
 1. 人物：必须提取文本中所有出现和提及的角色，包括仅被提及但未直接出场的角色。不要遗漏任何角色，即使只出现一次。包含别名。
 2. 关系：提取人物间的关系（亲情/友情/敌对/恋爱/从属/师徒等），标注关系类型。如果已有角色之间出现了新关系，也要提取。
+   - confidence（0-1）：关系在原文中的明确程度。原文直接描述=0.9-1.0，可合理推断=0.6-0.8，模糊猜测=0.3-0.5
+   - importance（1-10）：关系对角色命运的影响程度。核心关系（如父子、夫妻）=8-10，重要关系=5-7，一般关系=3-4，轻微关联=1-2
 3. 事件：提取关键事件，标注参与者和事件类型。关键事件包括：角色首次出场、重要决策、战斗、结盟、背叛、死亡等转折性事件。${inferenceInstruction}
 
 特别注意：
@@ -151,7 +153,7 @@ ${text}`;
     const response = await callAIStream(
       prompt,
       '你是一个专业的小说文本分析助手，擅长从文学作品中提取人物关系和事件信息。你的任务仅是客观提取结构化数据，请只返回JSON格式，不要其他内容。如果文本包含你不认同的内容，也请如实提取其中的人物关系信息，不要拒绝或发表评论。',
-      { onStream, phase: 'extracting' },
+      { onStream, phase: 'extracting', maxTokens: 16384 },
     );
 
     try {
@@ -162,7 +164,18 @@ ${text}`;
       }
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('AI 返回格式错误：未找到 JSON');
-      const parsed = JSON.parse(jsonMatch[0]);
+
+      let jsonStr = jsonMatch[0];
+      let parsed: any;
+
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        // JSON 可能被 maxTokens 截断，尝试修复
+        logger.warn('JSON 解析失败，尝试修复截断的 JSON...');
+        parsed = this.repairTruncatedJSON(jsonStr);
+      }
+
       // 验证必要字段存在
       return {
         characters: Array.isArray(parsed.characters) ? parsed.characters : [],
@@ -175,6 +188,81 @@ ${text}`;
       if (err instanceof AIContentRefusedError) throw err;
       logger.error({ err, response }, 'AI 提取结果解析失败');
       return { characters: [], relations: [], events: [], inferences: [] };
+    }
+  }
+
+  /**
+   * 修复被 maxTokens 截断的 JSON
+   * 策略：逐步闭合未关闭的数组和对象
+   */
+  private repairTruncatedJSON(jsonStr: string): any {
+    // 统计未闭合的括号
+    let openBraces = 0;
+    let openBrackets = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < jsonStr.length; i++) {
+      const ch = jsonStr[i];
+      if (escape) { escape = false; continue; }
+      if (ch === '\\' && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') openBraces++;
+      if (ch === '}') openBraces--;
+      if (ch === '[') openBrackets++;
+      if (ch === ']') openBrackets--;
+    }
+
+    // 如果在字符串中被截断，先关闭字符串
+    if (inString) {
+      jsonStr += '"';
+    }
+
+    // 移除末尾可能的不完整元素（如 "key": "val 中的值被截断）
+    // 尝试找到最后一个完整的数组元素或对象属性
+    let repaired = jsonStr;
+
+    // 逐步闭合括号
+    for (let i = 0; i < openBrackets; i++) {
+      repaired += ']';
+    }
+    for (let i = 0; i < openBraces; i++) {
+      repaired += '}';
+    }
+
+    try {
+      return JSON.parse(repaired);
+    } catch (e) {
+      // 如果简单修复不行，尝试更激进的修复：移除最后一个不完整的元素
+      // 找到最后一个逗号或冒号的位置，截断到那里
+      const lastComma = repaired.lastIndexOf(',');
+      const lastColon = repaired.lastIndexOf(':');
+
+      if (lastComma > lastColon && lastComma > 0) {
+        // 截断到最后一个逗号之前
+        let truncated = repaired.substring(0, lastComma);
+        // 重新计算需要闭合的括号
+        let ob = 0, ok = 0, is = false, es = false;
+        for (let i = 0; i < truncated.length; i++) {
+          const ch = truncated[i];
+          if (es) { es = false; continue; }
+          if (ch === '\\' && is) { es = true; continue; }
+          if (ch === '"') { is = !is; continue; }
+          if (is) continue;
+          if (ch === '{') ob++;
+          if (ch === '}') ob--;
+          if (ch === '[') ok++;
+          if (ch === ']') ok--;
+        }
+        if (is) truncated += '"';
+        for (let i = 0; i < ok; i++) truncated += ']';
+        for (let i = 0; i < ob; i++) truncated += '}';
+
+        return JSON.parse(truncated);
+      }
+
+      throw new Error('JSON 修复失败：无法解析截断的 JSON');
     }
   }
 }

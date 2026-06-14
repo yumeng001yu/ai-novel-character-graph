@@ -82,6 +82,45 @@ export class TaskQueueRepo {
     const redis = getRedis();
     await redis.del(`${KEY_PREFIX}${novelId}`);
   }
+
+  /**
+   * 获取所有处于 running 状态的任务（用于服务重启后恢复）
+   */
+  async getAllRunningTasks(): Promise<BuildTask[]> {
+    const redis = getRedis();
+    const keys = await redis.keys(`${KEY_PREFIX}*`);
+    const tasks: BuildTask[] = [];
+    for (const key of keys) {
+      try {
+        const data = await redis.get(key);
+        if (data) {
+          const task = JSON.parse(data) as BuildTask;
+          if (task.status === 'running') {
+            tasks.push(task);
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, key }, '解析任务数据失败');
+      }
+    }
+    return tasks;
+  }
+
+  /**
+   * 将 running 状态的任务标记为 interrupted（服务重启时调用）
+   */
+  async markRunningAsInterrupted(): Promise<number> {
+    const runningTasks = await this.getAllRunningTasks();
+    let count = 0;
+    for (const task of runningTasks) {
+      task.status = 'interrupted' as TaskStatus;
+      task.error = '服务重启导致任务中断，可手动续建';
+      await this.setTask(task.novelId, task);
+      count++;
+      logger.info({ novelId: task.novelId }, '任务标记为 interrupted');
+    }
+    return count;
+  }
 }
 
 export const taskQueueRepo = new TaskQueueRepo();

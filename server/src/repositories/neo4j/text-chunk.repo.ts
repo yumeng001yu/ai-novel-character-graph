@@ -65,12 +65,12 @@ export class TextChunkRepo {
     try {
       const recallK = topK * 5;
       const result = await session.run(
-        `CALL db.index.vector.queryNodes('text_chunk_embedding', $recallK, $queryEmbedding)
+        `CALL db.index.vector.queryNodes('text_chunk_embedding', toInteger($recallK), $queryEmbedding)
          YIELD node, score
          MATCH (n:Novel {id: $novelId})-[:HAS_CHUNK]->(t:TextChunk)
          WHERE t.id = node.id
          RETURN t.id AS id, t.stepNumber AS stepNumber, t.chapterRange AS chapterRange, t.text AS text, score
-         LIMIT $topK`,
+         LIMIT toInteger($topK)`,
         { novelId, recallK, topK, queryEmbedding }
       );
       return result.records.map(r => ({
@@ -114,7 +114,7 @@ export class TextChunkRepo {
         `CREATE VECTOR INDEX text_chunk_embedding IF NOT EXISTS
          FOR (t:TextChunk) ON (t.embedding)
          OPTIONS {indexConfig: {
-           \`vector.dimensions\`: $dimensions,
+           \`vector.dimensions\`: toInteger($dimensions),
            \`vector.similarity_function\`: 'cosine'
          }}`,
         { dimensions }

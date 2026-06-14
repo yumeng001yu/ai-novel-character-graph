@@ -10,6 +10,7 @@ import { exportRoutes } from './export.route';
 import { graphragRoutes } from './graphrag.route';
 import { knowledgeBaseRoutes } from './knowledge-base.route';
 import { characterChatRoutes } from './character-chat.route';
+import { promptPresetRoutes } from './prompt-preset.route';
 
 export function registerRoutes(app: FastifyInstance): void {
   // 健康检查（轻量，不查数据库）
@@ -38,4 +39,7 @@ export function registerRoutes(app: FastifyInstance): void {
 
   // 角色对话路由
   app.register(characterChatRoutes, { prefix: '/api/character-chat' });
+
+  // 提示词预设路由
+  app.register(promptPresetRoutes, { prefix: '/api/prompt-presets' });
 }
