@@ -14,12 +14,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/novelgraph/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:8080',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/novelgraph/, ''),
       },
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

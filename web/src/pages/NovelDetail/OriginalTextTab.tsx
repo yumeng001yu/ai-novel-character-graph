@@ -23,7 +23,7 @@ const OriginalTextTab: React.FC<Props> = ({ novelId }) => {
   const loadChapters = async () => {
     try {
       const res = await getNovelChapters(novelId);
-      const list = res.data || [];
+      const list = res.data?.chapters || res.data || [];
       setChapters(list);
       if (list.length > 0) {
         setSelectedChapter(list[0].index ?? list[0].chapter ?? 1);

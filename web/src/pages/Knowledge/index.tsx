@@ -106,7 +106,7 @@ const Knowledge: React.FC = () => {
   const loadCharacters = async (novelId: string) => {
     try {
       const res = await getNovelCharacters(novelId);
-      setCharacters(res.data || []);
+      setCharacters(res.data?.characters || res.data || []);
     } catch (err) {
       message.error('加载角色列表失败');
       setCharacters([]);

@@ -21,7 +21,7 @@ const Continue: React.FC = () => {
   const loadNovels = async () => {
     try {
       const res = await getNovels();
-      setNovels(res.data || []);
+      setNovels(res.data?.novels || res.data || []);
     } catch (err) {
       message.error('加载小说列表失败');
     }

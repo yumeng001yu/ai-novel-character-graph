@@ -47,7 +47,7 @@ const PromptPresetSettings: React.FC = () => {
   const loadPresets = async () => {
     try {
       const res = await getPromptPresets();
-      const list = res.data as PresetData[];
+      const list = (res.data?.presets || res.data || []) as PresetData[];
       setPresets(list);
       // 自动选中默认预设
       const def = list.find((p: PresetData) => p.isDefault) || list[0];
@@ -63,7 +63,8 @@ const PromptPresetSettings: React.FC = () => {
   const loadPreset = async (id: string) => {
     try {
       const res = await getPromptPreset(id);
-      setCurrent(res.data);
+      const data = res.data?.preset || res.data;
+      setCurrent(data);
       setCurrentId(id);
     } catch (err) {
       message.error('加载预设失败');
@@ -73,7 +74,12 @@ const PromptPresetSettings: React.FC = () => {
   const loadMacros = async () => {
     try {
       const res = await getPromptMacros();
-      setMacros(res.data);
+      const macroArr = (res.data?.macros || res.data || []) as Array<{name: string; description: string}>;
+      const macroMap: Record<string, string> = {};
+      macroArr.forEach(m => {
+        if (m.name) macroMap[m.name] = m.description || '';
+      });
+      setMacros(macroMap);
     } catch (err) {
       // 非致命
     }

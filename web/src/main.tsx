@@ -4,6 +4,7 @@ import { ConfigProvider, theme as antTheme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { QueryProvider } from './providers/QueryProvider';
 import { ThemeKey, themePresets, getStoredTheme, setStoredTheme, isDarkTheme } from './themes';
 import './styles/global.css';
 
@@ -35,6 +36,8 @@ const Root: React.FC = () => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Root />
+    <QueryProvider>
+      <Root />
+    </QueryProvider>
   </React.StrictMode>
 );

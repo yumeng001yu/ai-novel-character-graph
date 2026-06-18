@@ -29,19 +29,18 @@ const Settings: React.FC = () => {
   const loadAiConfig = async () => {
     try {
       const res = await getAiConfig();
-      if (res.data.configured === false) {
+      const config = res.data?.settings || res.data;
+      if (config?.configured === false) {
         setConfigured(false);
         return;
       }
       setConfigured(true);
-      // 注意：不设置 apiKey 字段（后端返回的是 apiKeyMasked，不是真实 key）
-      // 用户需要重新输入 API Key 才能更新
       aiForm.setFieldsValue({
-        apiUrl: res.data.apiUrl,
-        model: res.data.model,
-        contextSize: res.data.contextSize,
-        temperature: res.data.temperature,
-        maxTokens: res.data.maxTokens,
+        apiUrl: config.apiUrl,
+        model: config.model,
+        contextSize: config.contextSize,
+        temperature: config.temperature,
+        maxTokens: config.maxTokens,
       });
     } catch (err) {
       message.error('加载AI配置失败');
@@ -51,7 +50,8 @@ const Settings: React.FC = () => {
   const loadBuildConfig = async () => {
     try {
       const res = await getBuildConfig();
-      buildForm.setFieldsValue(res.data);
+      const config = res.data?.settings || res.data;
+      buildForm.setFieldsValue(config);
     } catch (err) {
       message.error('加载构建配置失败');
     }
@@ -60,15 +60,16 @@ const Settings: React.FC = () => {
   const loadEmbeddingConfig = async () => {
     try {
       const res = await getEmbeddingConfig();
-      if (res.data.configured === false) {
+      const config = res.data?.settings || res.data;
+      if (config?.configured === false) {
         setEmbConfigured(false);
         return;
       }
       setEmbConfigured(true);
       embForm.setFieldsValue({
-        apiUrl: res.data.apiUrl,
-        model: res.data.model,
-        dimensions: res.data.dimensions,
+        apiUrl: config.apiUrl,
+        model: config.model,
+        dimensions: config.dimensions,
       });
     } catch (err) {
       // ignore
@@ -78,14 +79,15 @@ const Settings: React.FC = () => {
   const loadRerankerConfig = async () => {
     try {
       const res = await getRerankerConfig();
-      if (res.data.configured === false) {
+      const config = res.data?.settings || res.data;
+      if (config?.configured === false) {
         setRerankerConfigured(false);
         return;
       }
       setRerankerConfigured(true);
       rerankerForm.setFieldsValue({
-        apiUrl: res.data.apiUrl,
-        model: res.data.model,
+        apiUrl: config.apiUrl,
+        model: config.model,
       });
     } catch (err) {
       // ignore

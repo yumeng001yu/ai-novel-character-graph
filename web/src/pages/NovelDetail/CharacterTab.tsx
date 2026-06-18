@@ -18,7 +18,7 @@ const CharacterTab: React.FC<Props> = ({ novelId }) => {
     if (!novelId || !keyword) return message.warning('请输入关键词');
     try {
       const res = await searchCharacters(novelId, keyword);
-      setResults(res.data || []);
+      setResults(res.data?.characters || res.data || []);
     } catch (err: any) {
       console.error('搜索失败:', err?.response?.status, err?.response?.data || err?.message || err);
       message.error(`搜索失败: ${err?.response?.status || err?.message || '未知错误'}`);

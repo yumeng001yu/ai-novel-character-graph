@@ -62,9 +62,10 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
   const loadSnapshots = async (nid: string) => {
     try {
       const res = await getSnapshots(nid);
-      setSnapshots(res.data || []);
-      if (res.data?.length > 0) {
-        setCurrentStep(res.data[res.data.length - 1].step);
+      const snapshotList = res.data?.snapshots || res.data || [];
+      setSnapshots(snapshotList);
+      if (snapshotList.length > 0) {
+        setCurrentStep(snapshotList[snapshotList.length - 1].step);
       }
     } catch (err) {
       message.error('加载快照失败');
@@ -158,7 +159,7 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
 
     const nodes = (data.nodes || []).map((n: any) => ({
       id: n.id,
-      label: n.name || n.id,
+      label: n.name || n.label || n.id,
       type: 'circle',
       size: n.isProtagonist ? 65 : (data.centerId === n.id ? 55 : 45),
       style: {
@@ -169,7 +170,7 @@ const GraphTab: React.FC<Props> = ({ novelId }) => {
     const edges = (data.edges || []).map((e: any) => ({
       source: e.source || e.sourceId,
       target: e.target || e.targetId,
-      label: e.relationType || '',
+      label: e.relationType || e.label || '',
       style: e.isInference ? { lineDash: [5, 5], stroke: primaryColor } : {},
     }));
 

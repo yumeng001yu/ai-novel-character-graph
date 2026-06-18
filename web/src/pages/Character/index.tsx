@@ -19,7 +19,7 @@ const Character: React.FC = () => {
   const loadNovels = async () => {
     try {
       const res = await getNovels();
-      setNovels(res.data || []);
+      setNovels(res.data?.novels || res.data || []);
     } catch (err) {
       message.error('加载小说列表失败');
     }
@@ -29,7 +29,7 @@ const Character: React.FC = () => {
     if (!novelId || !keyword) return message.warning('请选择小说并输入关键词');
     try {
       const res = await searchCharacters(novelId, keyword);
-      setResults(res.data || []);
+      setResults(res.data?.characters || res.data || []);
     } catch (err) {
       message.error('搜索失败');
     }
