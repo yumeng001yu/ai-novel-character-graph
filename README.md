@@ -2,7 +2,7 @@
 
 AI 驱动的小说角色关系图谱构建工具 —— 自动解析小说文本，逐步构建人物关系图谱，支持角色搜索、经历回溯、推断标注与图谱演变回放。
 
-> **架构说明**：本项目采用微服务架构（V2）。`main` 分支保留旧版单体框架（TypeScript，位于 `server/`），`feat/microservice-v2` 分支为当前微服务版本（Go + Python，位于 `services/`）。详见 [docs/ARCHITECTURE_V2.md](docs/ARCHITECTURE_V2.md)。
+> **架构说明**：本项目采用微服务架构（V2）。`main` 分支为当前微服务版本（Go + Python，位于 `services/`），`legacy/old-framework` 分支保留旧版单体框架（TypeScript，位于 `server/`）。详见 [docs/ARCHITECTURE_V2.md](docs/ARCHITECTURE_V2.md)。
 
 ## 功能概览
 
@@ -567,7 +567,6 @@ ai-novel-character-graph/
 # 克隆项目
 git clone https://github.com/yumeng001yu/ai-novel-character-graph.git
 cd ai-novel-character-graph
-git checkout feat/microservice-v2
 
 # 启动所有微服务（Neo4j + Redis + PostgreSQL + API 网关 + AI 服务 + 前端）
 docker-compose -f docker-compose.v2.yml up -d
@@ -585,7 +584,6 @@ docker-compose -f docker-compose.v2.yml up -d
 # 克隆项目
 git clone https://github.com/yumeng001yu/ai-novel-character-graph.git
 cd ai-novel-character-graph
-git checkout feat/microservice-v2
 
 # 1. 启动基础设施（Redis + PostgreSQL）
 apt-get install -y redis-server postgresql
@@ -623,12 +621,12 @@ cp -r dist/* ../services/api-gateway/static/
 - 所有功能（构建、快照、回退、图谱查询）均可在文件系统模式下工作
 - 数据保存在 `server/output/novels/{novelId}/` 目录
 
-### 旧版框架（V1）部署
+### 旧版框架（V1）
 
-如需使用旧版单体框架（TypeScript），切换到 `main` 分支：
+如需使用旧版单体框架（TypeScript），切换到 `legacy/old-framework` 分支：
 
 ```bash
-git checkout main
+git checkout legacy/old-framework
 docker-compose up -d
 # 前端：http://localhost
 # 后端 API：http://localhost:3001
@@ -638,8 +636,8 @@ docker-compose up -d
 
 | 分支 | 说明 |
 |------|------|
-| `main` | 旧版单体框架（TypeScript + Fastify），位于 `server/` |
-| `feat/microservice-v2` | 微服务架构（Go + Python），位于 `services/` |
+| `main` | 微服务架构（Go + Python），位于 `services/`（当前默认） |
+| `legacy/old-framework` | 旧版单体框架（TypeScript + Fastify），位于 `server/` |
 
 两套架构并存，互不覆盖。详见 [docs/ARCHITECTURE_V2.md](docs/ARCHITECTURE_V2.md)。
 

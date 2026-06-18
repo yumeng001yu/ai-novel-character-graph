@@ -1,26 +1,26 @@
 # 微服务架构 V2（Go + Python）
 
-本文档说明新增的微服务架构（V2），以及它与原有单体框架（V1）的并存关系。
+本文档说明微服务架构（V2），以及它与旧版单体框架（V1）的并存关系。
 
-> **重要**：V2 为新增代码，**不替换、不覆盖** V1 的任何代码。两套架构并存，可独立部署。
+> **重要**：V2（微服务架构）现为 `main` 分支的默认代码。V1（旧版单体框架）保留在 `legacy/old-framework` 分支。两套架构并存，可独立部署。
 
 ---
 
 ## 一、架构对比
 
-### V1（原有单体框架，保留不动）
+### V1（旧版单体框架，位于 `legacy/old-framework` 分支）
 
 - **位置**：`server/` 目录
 - **技术栈**：Node.js + TypeScript + Express
 - **部署**：`docker-compose.yml`
-- **状态**：完整保留，不做任何修改
+- **状态**：完整保留在 `legacy/old-framework` 分支
 
-### V2（新增微服务架构）
+### V2（微服务架构，位于 `main` 分支）
 
 - **位置**：`services/`、`infrastructure/` 目录
 - **技术栈**：Go (Gin) API 网关 + Python (FastAPI) AI 服务
 - **部署**：`docker-compose.v2.yml`
-- **状态**：本次新增
+- **状态**：当前默认分支
 
 ---
 
@@ -196,16 +196,17 @@ docker-compose -f docker-compose.v2.yml up -d
 
 | 维度 | V1 | V2 |
 |------|----|----|
+| 分支 | `legacy/old-framework` | `main`（默认） |
 | 后端代码 | `server/` | `services/` |
 | 部署文件 | `docker-compose.yml` | `docker-compose.v2.yml` |
 | 后端语言 | TypeScript | Go + Python |
 | 数据库 | Neo4j | Neo4j（可选）+ 文件系统后备 |
 | 端口 | 3000 | 8080（网关）+ 8000（AI） |
-| 状态 | 保留不动 | 本次新增 |
+| 状态 | 保留在 legacy 分支 | 当前默认 |
 
 **切换方式**：
-- 使用 V1：`docker-compose up -d`
-- 使用 V2：`docker-compose -f docker-compose.v2.yml up -d`
+- 使用 V2（默认）：`git checkout main` → `docker-compose -f docker-compose.v2.yml up -d`
+- 使用 V1：`git checkout legacy/old-framework` → `docker-compose up -d`
 
 两套配置互不干扰，可按需选择。
 
